@@ -1,0 +1,37 @@
+[package]
+name = "imgkit"
+version = "1.2.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "^2.0"
+anyhow = "^1.0"
+lz4_flex = "^0.12"
+lz4 = "^1.28"
+lzma-rs = { version = "^0.3", features = ["stream"] }
+liblzma = "^0.4"
+liblzma-sys = "^0.4"
+ruzstd = "^0.8"
+zstd = "^0.13"
+flate2 = { version = "^1.1", features = ["zlib-ng"], default-features = false }
+byteorder = "^1.5"
+clap = { version = "^4.5", features = ["derive"] }
+zerocopy = { version = "^0.8", features = ["derive"] }
+bitflags = "^2.10"
+regex = "^1.12"
+rayon = "^1.11"
+log = "^0.4"
+env_logger = "^0.11"
+chrono = "^0.4"
+sha2 = "^0.10"
+crc32c = "^0.6"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "^0.3", features = ["fileapi", "winnt"] }
+
+[profile.release]
+opt-level = "z"          # optimize for binary size
+lto = true               # Link Time Optimization
+codegen-units = 1        # single codegen unit for better optimization
+strip = true             # strip symbol information
+panic = "abort"          # reduce unwinding code size

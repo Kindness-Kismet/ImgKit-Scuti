@@ -1,0 +1,123 @@
+# Rust Build Artifacts
+/target/
+Cargo.lock
+*.lock
+**/*.rs.bk
+*.pdb
+*.rlib
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-*
+.vs/
+.fleet/
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Privacy & Sensitive Data
+# ========================
+# Android System Images (may contain sensitive data)
+*.img
+*.img.ext4
+*.img.sparse
+
+# Extracted Content (may contain user data)
+/output/
+/test_output/
+test_output_*/
+**/test_output/
+extracted_*/
+unpacked_*/
+
+# Conversation & Analysis Files (may contain implementation details)
+*.txt
+!README*.txt
+!LICENSE*.txt
+*-对话*.txt
+*-conversation*.txt
+*-chat*.txt
+
+# Markdown 文档（仅保留 README）
+*.md
+**/*.md
+!README.md
+!README*.md
+!**/README.md
+!**/README*.md
+
+# Configuration & Logs
+*.log
+*.log.*
+config_*.json
+local_config.*
+.env
+.env.*
+!.env.example
+
+# Temporary & Cache Files
+tmp/
+temp/
+*.tmp
+*.temp
+*.cache
+.cache/
+*.bak
+*.backup
+*_backup
+*_old
+
+# Sample & Test Data
+samples/
+样本/
+test_images/
+test_data/
+*.sample
+
+# Build & Release
+dist/
+build/
+releases/
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# Generated Documentation
+docs/_build/
+site/
+
+# Python (if any)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# Node (if any)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Claude / Codex
+.claude/
+.codex/
+**/.claude/
+**/.codex/
+
+# 本地测试目录
+all-test/
