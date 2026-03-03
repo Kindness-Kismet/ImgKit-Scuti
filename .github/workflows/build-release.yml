@@ -60,7 +60,7 @@ jobs:
         id: notes
         shell: bash
         run: |
-          notes_file=".github/workflows/release-notes/release-notes.md"
+          notes_file=".github/CHANGELOG.md"
           if [ ! -f "$notes_file" ]; then
             echo "::error::未找到更新日志文件: $notes_file"
             exit 1
