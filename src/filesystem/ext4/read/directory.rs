@@ -1,15 +1,15 @@
-// EXT4 directory reading module
+// EXT4 目录读取模块
 
-use super::error::{Ext4Error, Result};
-use super::types::*;
+use crate::filesystem::ext4::error::{Ext4Error, Result};
+use crate::filesystem::ext4::types::*;
 use std::io::{Read, Seek};
 use std::path::PathBuf;
 use zerocopy::TryFromBytes;
 
 impl Inode {
-    // Read all entries in a directory
+    // 读取目录下的所有 dir entry
     //
-    // Return value: Vec<(file name, inode number, file type)>
+    // 返回值: Vec<(文件名, inode 号, 文件类型)>
     pub fn open_dir<R: Read + Seek>(
         &self,
         volume: &mut Ext4Volume<R>,
@@ -22,22 +22,22 @@ impl Inode {
         let mut entries = Vec::new();
         let mut offset = 0;
 
-        // Parse directory entry
+        // 解析 dir entry
         while offset + std::mem::size_of::<Ext4DirEntry2>() <= data.len() {
             if let Ok((dirent, _)) = Ext4DirEntry2::try_ref_from_prefix(&data[offset..]) {
-                // rec_len is 0 indicating the end of the directory
+                // rec_len 为 0 表示目录已结束
                 if dirent.rec_len == 0 {
                     break;
                 }
 
-                // Check whether the record length exceeds the data range
+                // 检查记录长度是否超出数据范围
                 if offset + dirent.rec_len as usize > data.len() {
                     break;
                 }
 
-                // Skip empty entries and checksum entries
+                // 跳过空 dir entry 与 checksum entry
                 if dirent.inode != 0 && dirent.file_type != file_type::CHECKSUM {
-                    // Check if the name length is legal
+                    // 检查名称长度是否合法
                     if offset + 8 + dirent.name_len as usize > data.len() {
                         break;
                     }

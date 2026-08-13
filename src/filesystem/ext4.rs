@@ -1,15 +1,16 @@
-// EXT4 file system module
+// EXT4 文件系统模块。
 
-pub mod directory;
+// 类型与错误定义
 pub mod error;
-pub mod extractor;
-pub mod file;
 pub mod types;
-pub mod volume;
-pub mod write;
-pub mod xattr;
 
-// Re-export common types
+// 读取功能
+pub mod read;
+
+// 写入功能
+pub mod write;
+
+// 重导出常用类型
 pub use error::{Ext4Error, Result};
-pub use extractor::*;
+pub use read::extractor::*;
 pub use types::*;

@@ -1,7 +1,7 @@
-// EXT4 file system extractor
+// EXT4 文件系统提取器
 
-use super::types::{Ext4Volume, Inode, VfsCapData};
 use crate::container::sparse::SparseReader;
+use crate::filesystem::ext4::types::{Ext4Volume, Inode, VfsCapData};
 use crate::utils::{
     check_windows_case_conflict, create_symlink_from_bytes, display_completion, display_progress,
     is_case_sensitive_directory, join_output_path, sanitize_single_component, write_file_contexts,
@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-// EXT4 extraction configuration
+// EXT4 提取配置
 pub struct ExtractConfig {
     pub input_image: String,
     pub output_dir: String,
@@ -24,7 +24,7 @@ pub struct ExtractConfig {
     pub file_contexts_path: Option<String>,
 }
 
-// File extraction task
+// 文件提取任务
 #[derive(Clone)]
 struct FileTask {
     inode: Inode,
@@ -33,7 +33,7 @@ struct FileTask {
     link_target_bytes: Vec<u8>,
 }
 
-// Extract files and metadata from ext4 images
+// 从 ext4 镜像中提取文件与元数据
 pub fn extract_image(config: ExtractConfig) -> anyhow::Result<()> {
     let fs_config_output_path = config.fs_config_path.as_ref().map(PathBuf::from);
     let file_contexts_output_path = config.file_contexts_path.as_ref().map(PathBuf::from);
@@ -53,8 +53,8 @@ pub fn extract_image(config: ExtractConfig) -> anyhow::Result<()> {
         );
     }
 
-    let file =
-        File::open(&config.input_image).map_err(|e| anyhow::anyhow!("打开镜像文件失败: {}", e))?;
+    let file = File::open(&config.input_image)
+        .map_err(|e| anyhow::anyhow!("failed to open image file: {}", e))?;
     let buf_reader = BufReader::new(file);
     let volume = Ext4Volume::new(buf_reader)?;
     extract(
@@ -83,16 +83,16 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
     let prefix = image_path_obj
         .file_stem()
         .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow::anyhow!("无法获取文件名"))?;
+        .ok_or_else(|| anyhow::anyhow!("unable to get file name"))?;
     let filename = image_path_obj
         .file_name()
         .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow::anyhow!("无法获取文件全名"))?;
+        .ok_or_else(|| anyhow::anyhow!("unable to get full file name"))?;
 
     fs::create_dir_all(config_output_dir)
-        .map_err(|e| anyhow::anyhow!("创建配置输出目录失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to create config output directory: {}", e))?;
     fs::create_dir_all(file_extract_dir)
-        .map_err(|e| anyhow::anyhow!("创建文件提取目录失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to create file extraction directory: {}", e))?;
     let extract_root = file_extract_dir.join(prefix);
     fs::create_dir_all(&extract_root)?;
     let case_sensitive = is_case_sensitive_directory(&extract_root)?;
@@ -101,7 +101,7 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
     let mut fs_config = Vec::new();
     let mut file_contexts = HashMap::new();
 
-    // Phase One: Collect All Documents Task
+    // 第一阶段: 收集所有文件任务
     let mut file_tasks = Vec::new();
     let mut stack = vec![(volume.root()?, PathBuf::from("/"))];
     let mut visited = std::collections::HashSet::new();
@@ -138,7 +138,7 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
         }
 
         let output_path = join_output_path(&extract_root, &path)
-            .map_err(|e| anyhow::anyhow!("无效输出路径 {:?}: {}", path, e))?;
+            .map_err(|e| anyhow::anyhow!("invalid output path {:?}: {}", path, e))?;
 
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent)?;
@@ -153,7 +153,7 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
                 let safe_name = match sanitize_single_component(&name) {
                     Ok(value) => value,
                     Err(err) => {
-                        log::warn!("跳过非法目录项 {:?}: {}", name, err);
+                        log::warn!("skipping invalid directory entry {:?}: {}", name, err);
                         continue;
                     }
                 };
@@ -161,7 +161,7 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
                 stack.push((sub_inode, path.join(safe_name)));
             }
         } else if inode.is_file() || inode.is_symlink() {
-            // Collect file tasks instead of extracting immediately
+            // 先收集文件任务, 不立即提取
             file_tasks.push(FileTask {
                 inode: inode.clone(),
                 path: path.clone(),
@@ -171,20 +171,20 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
         }
     }
 
-    // Phase 2: Process all files in parallel
+    // 第二阶段: 并行处理所有文件
     let image_path_string = Arc::new(image_path.to_string());
     let extracted_count = Arc::new(AtomicUsize::new(0));
     let failed_count = Arc::new(AtomicUsize::new(0));
     let total_task_count = file_tasks.len();
 
-    // Define macros to handle individual tasks and eliminate code duplication
+    // 定义宏处理单个任务, 消除重复代码
     macro_rules! process_task {
         ($vol:expr, $task:expr) => {{
             let result: anyhow::Result<()> = if $task.inode.is_file() {
                 match $task.inode.open_read($vol) {
                     Ok(data) => fs::write(&$task.output_path, data)
-                        .map_err(|e| anyhow::anyhow!("写入文件失败: {}", e)),
-                    Err(e) => Err(anyhow::anyhow!("读取文件数据失败: {}", e)),
+                        .map_err(|e| anyhow::anyhow!("failed to write file: {}", e)),
+                    Err(e) => Err(anyhow::anyhow!("failed to read file data: {}", e)),
                 }
             } else if $task.inode.is_symlink() {
                 if $task.output_path.exists() {
@@ -196,7 +196,7 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
             };
 
             if let Err(e) = result {
-                log::warn!(" 提取 {:?} 失败: {}", $task.path, e);
+                log::warn!(" failed to extract {:?}: {}", $task.path, e);
                 failed_count.fetch_add(1, Ordering::Relaxed);
             }
 
@@ -216,7 +216,10 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
                 if let Some(volume) = thread_volume.as_mut() {
                     process_task!(volume, task);
                 } else {
-                    log::warn!("线程内 EXT4 volume 初始化失败，跳过 {:?}", task.path);
+                    log::warn!(
+                        "failed to init EXT4 volume in worker thread, skipping {:?}",
+                        task.path
+                    );
                     failed_count.fetch_add(1, Ordering::Relaxed);
                     let count = extracted_count.fetch_add(1, Ordering::Relaxed) + 1;
                     display_progress(filename, count, total_task_count);
@@ -234,7 +237,10 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
                 if let Some(volume) = thread_volume.as_mut() {
                     process_task!(volume, task);
                 } else {
-                    log::warn!("线程内 EXT4 volume 初始化失败，跳过 {:?}", task.path);
+                    log::warn!(
+                        "failed to init EXT4 volume in worker thread, skipping {:?}",
+                        task.path
+                    );
                     failed_count.fetch_add(1, Ordering::Relaxed);
                     let count = extracted_count.fetch_add(1, Ordering::Relaxed) + 1;
                     display_progress(filename, count, total_task_count);
@@ -261,13 +267,16 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
 
     let failed = failed_count.load(Ordering::Relaxed);
     if failed > 0 {
-        return Err(anyhow::anyhow!("EXT4 提取存在 {} 个失败条目", failed));
+        return Err(anyhow::anyhow!(
+            "EXT4 extraction has {} failed entries",
+            failed
+        ));
     }
 
     Ok(())
 }
 
-// Extract extended attributes (xattrs) from inode
+// 从 inode 中提取 xattr
 fn extract_xattrs<R: std::io::Read + std::io::Seek>(
     volume: &mut Ext4Volume<R>,
     inode: &Inode,

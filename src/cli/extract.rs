@@ -4,7 +4,7 @@
 use crate::{
     container::super_partition::extractor as super_extractor,
     filesystem::{
-        erofs::read::extractor as erofs_extractor, ext4::extractor as ext4_extractor,
+        erofs::read::extractor as erofs_extractor, ext4::read::extractor as ext4_extractor,
         f2fs::read::extractor as f2fs_extractor,
     },
     utils::detect_filesystem,

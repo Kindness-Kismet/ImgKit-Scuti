@@ -1,21 +1,21 @@
-// EXT4 extended attribute reading module
+// EXT4 扩展属性读取模块
 
-use super::error::Result;
-use super::types::*;
+use crate::filesystem::ext4::error::Result;
+use crate::filesystem::ext4::types::*;
 use std::io::{Read, Seek};
 use zerocopy::TryFromBytes;
 
 impl Inode {
-    // Read all extended attributes (xattrs) of an inode
+    // 读取 inode 的全部 xattr
     //
-    // Return value: Vec<(attribute name, attribute value)>
+    // 返回值: Vec<(属性名, 属性值)>
     pub fn xattrs<R: Read + Seek>(
         &self,
         volume: &mut Ext4Volume<R>,
     ) -> Result<Vec<(String, Vec<u8>)>> {
         let mut xattrs = Vec::new();
 
-        // 1. Read inline xattr (stored inside inode)
+        // 1. 读取 inline xattr (存放在 inode 内部)
         let inline_data_start =
             EXT2_GOOD_OLD_INODE_SIZE as usize + self.inode.i_extra_isize as usize;
         if self.data.len() > inline_data_start {
@@ -23,20 +23,20 @@ impl Inode {
             if let Ok((header, _)) = Ext4XattrIbodyHeader::try_ref_from_prefix(inline_data)
                 && header.h_magic == EXT4_XATTR_HEADER_MAGIC
             {
-                // xattr entry after header, 4-byte aligned
+                // xattr entry 位于 header 之后, 按 4 字节对齐
                 let entries_start = (std::mem::size_of::<Ext4XattrIbodyHeader>() + 3) & !3;
                 self.parse_xattr_entries(inline_data, entries_start, &mut xattrs, volume)?;
             }
         }
 
-        // 2. Read external xattr (stored in independent block)
+        // 2. 读取外部 xattr (存放在独立块中)
         if self.inode.i_file_acl() != 0 {
             let mut block_data = vec![0u8; volume.block_size as usize];
             volume.read_block(self.inode.i_file_acl(), &mut block_data)?;
             if let Ok((header, _)) = Ext4XattrHeader::try_ref_from_prefix(&block_data)
                 && header.h_magic == EXT4_XATTR_HEADER_MAGIC
             {
-                // xattr entry after header, 4-byte aligned
+                // xattr entry 位于 header 之后, 按 4 字节对齐
                 let entries_start = (std::mem::size_of::<Ext4XattrHeader>() + 3) & !3;
                 self.parse_xattr_entries(&block_data, entries_start, &mut xattrs, volume)?;
             }
@@ -44,7 +44,7 @@ impl Inode {
         Ok(xattrs)
     }
 
-    // Parse a list of xattr entries from raw data
+    // 从原始数据中解析 xattr entry 列表
     fn parse_xattr_entries<R: Read + Seek>(
         &self,
         raw_data: &[u8],
@@ -54,7 +54,7 @@ impl Inode {
     ) -> Result<()> {
         while i + std::mem::size_of::<Ext4XattrEntry>() <= raw_data.len() {
             if let Ok((entry, _)) = Ext4XattrEntry::try_ref_from_prefix(&raw_data[i..]) {
-                // An all-zero entry indicates the end of the list
+                // 全零 entry 表示列表结束
                 if entry.e_name_len == 0
                     && entry.e_name_index == 0
                     && entry.e_value_offs == 0
@@ -63,10 +63,13 @@ impl Inode {
                     break;
                 }
 
-                // Read attribute name
+                // 读取属性名
                 let name_start = i + std::mem::size_of::<Ext4XattrEntry>();
                 if name_start + entry.e_name_len as usize > raw_data.len() {
-                    eprintln!("[警告] inode {} 的 xattr 条目名称超出范围", self.inode_idx);
+                    eprintln!(
+                        "[warning] xattr entry name out of range for inode {}",
+                        self.inode_idx
+                    );
                     break;
                 }
                 let name = format!(
@@ -77,13 +80,13 @@ impl Inode {
                     )
                 );
 
-                // Read attribute value
+                // 读取属性值
                 if entry.e_value_inum == 0 {
-                    // The value is stored in the current block
+                    // 属性值存放在当前块中
                     let value_start = entry.e_value_offs as usize;
                     if value_start + entry.e_value_size as usize > raw_data.len() {
                         eprintln!(
-                            "[警告] inode {} 的 xattr 值超出范围 (名称: {})",
+                            "[warning] xattr value out of range for inode {} (name: {})",
                             self.inode_idx, name
                         );
                         break;
@@ -92,7 +95,7 @@ impl Inode {
                         raw_data[value_start..value_start + entry.e_value_size as usize].to_vec();
                     xattrs.push((name, value));
                 } else {
-                    // Values ​​are stored in separate inodes (large attributes)
+                    // 属性值存放在独立 inode 中 (大属性)
                     match volume.get_inode(entry.e_value_inum) {
                         Ok(xattr_inode) => {
                             let value = xattr_inode.open_read(volume)?;
@@ -101,18 +104,18 @@ impl Inode {
                         Err(_) => {
                             let invalid_inum = entry.e_value_inum;
                             eprintln!(
-                                "\n[警告] 因无效的 inode 引用 {}，跳过 inode {} 的 xattr '{}'",
+                                "\n[warning] invalid inode reference {}, skipping xattr of inode {}: '{}'",
                                 invalid_inum, self.inode_idx, name
                             );
                         }
                     }
                 }
 
-                // Move to next item (aligned)
+                // 移动到下一项 (按对齐处理)
                 let entry_size = entry.size();
                 if entry_size == 0 {
                     eprintln!(
-                        "[警告] inode {} 的 xattr 条目大小为 0，中断。",
+                        "[warning] xattr entry size is 0 for inode {}, aborting",
                         self.inode_idx
                     );
                     break;
