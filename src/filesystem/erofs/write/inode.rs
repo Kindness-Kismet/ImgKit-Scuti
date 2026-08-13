@@ -1,13 +1,13 @@
-// EROFS Inode Builder
+// EROFS inode 构建器
 //
-// Build the EROFS inode structure.
+// 构建 EROFS inode 结构.
 
 #![allow(dead_code)]
 
 use crate::filesystem::erofs::Result;
 use crate::filesystem::erofs::consts::*;
 
-// Xattr entry
+// xattr 条目
 #[derive(Debug, Clone)]
 pub struct XattrEntry {
     pub name_index: u8,
@@ -16,7 +16,7 @@ pub struct XattrEntry {
 }
 
 impl XattrEntry {
-    // Create SELinux context xattr
+    // 创建 SELinux 上下文 xattr
     pub fn selinux(context: &str) -> Self {
         XattrEntry {
             name_index: EROFS_XATTR_INDEX_SECURITY,
@@ -25,13 +25,13 @@ impl XattrEntry {
         }
     }
 
-    // Calculate the aligned size
+    // 计算对齐后的大小
     pub fn aligned_size(&self) -> usize {
         let raw_size = 4 + self.name.len() + self.value.len();
         (raw_size + 3) & !3
     }
 
-    // serialize to bytes
+    // 序列化为字节
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(self.aligned_size());
         buf.push(self.name.len() as u8);
@@ -39,7 +39,7 @@ impl XattrEntry {
         buf.extend_from_slice(&(self.value.len() as u16).to_le_bytes());
         buf.extend_from_slice(&self.name);
         buf.extend_from_slice(&self.value);
-        // Aligned to 4 bytes
+        // 对齐到 4 字节
         while buf.len() % 4 != 0 {
             buf.push(0);
         }
@@ -47,10 +47,10 @@ impl XattrEntry {
     }
 }
 
-// Inode builder
+// inode 构建器
 #[derive(Debug)]
 pub struct InodeBuilder {
-    // Basic properties
+    // 基础属性
     mode: u16,
     uid: u32,
     gid: u32,
@@ -59,22 +59,22 @@ pub struct InodeBuilder {
     mtime: u64,
     mtime_nsec: u32,
 
-    // Data layout
+    // 数据布局
     data_layout: u16,
     is_extended: bool,
 
-    // data location
+    // 数据位置
     raw_blkaddr: u32,
     inline_data: Option<Vec<u8>>,
 
-    // Compression related
+    // 压缩相关
     compress_header: Option<Vec<u8>>,
     compress_indexes: Option<Vec<u8>>,
 
-    // Xattr
+    // xattr 列表
     xattrs: Vec<XattrEntry>,
 
-    // inode number
+    // inode 编号
     ino: u32,
 }
 
@@ -99,7 +99,7 @@ impl InodeBuilder {
         }
     }
 
-    // Create directory inode
+    // 创建目录 inode
     pub fn new_dir(mode: u16, uid: u32, gid: u32) -> Self {
         let mut builder = Self::new();
         builder.mode = S_IFDIR | (mode & 0o7777);
@@ -109,7 +109,7 @@ impl InodeBuilder {
         builder
     }
 
-    // Create a normal file inode
+    // 创建普通文件 inode
     pub fn new_file(mode: u16, uid: u32, gid: u32) -> Self {
         let mut builder = Self::new();
         builder.mode = S_IFREG | (mode & 0o7777);
@@ -118,7 +118,7 @@ impl InodeBuilder {
         builder
     }
 
-    // Create symbolic link inode
+    // 创建符号链接 inode
     pub fn new_symlink(uid: u32, gid: u32) -> Self {
         let mut builder = Self::new();
         builder.mode = S_IFLNK | 0o777;
@@ -167,11 +167,11 @@ impl InodeBuilder {
         self.size = data.len() as u64;
         self.inline_data = Some(data);
         self.data_layout = EROFS_INODE_FLAT_INLINE;
-        self.raw_blkaddr = 0xffffffff; // Inline data markup
+        self.raw_blkaddr = 0xffffffff; // inline 数据标记
         self
     }
 
-    // Set inline data without overriding size (for hybrid layouts)
+    // 设置 inline 数据但不覆盖 size (用于混合布局)
     pub fn with_tail_inline_data(mut self, data: Vec<u8>) -> Self {
         self.inline_data = Some(data);
         self.data_layout = EROFS_INODE_FLAT_INLINE;
@@ -197,19 +197,19 @@ impl InodeBuilder {
         self
     }
 
-    // Set compression header
+    // 设置压缩 map header
     pub fn with_compress_header(mut self, header: Vec<u8>) -> Self {
         self.compress_header = Some(header);
         self
     }
 
-    // Set up compressed index
+    // 设置压缩索引
     pub fn with_compress_indexes(mut self, indexes: Vec<u8>) -> Self {
         self.compress_indexes = Some(indexes);
         self
     }
 
-    // Get file type
+    // 获取文件类型
     pub fn file_type(&self) -> u8 {
         match self.mode & S_IFMT {
             S_IFREG => EROFS_FT_REG_FILE,
@@ -223,12 +223,12 @@ impl InodeBuilder {
         }
     }
 
-    // Calculate xattr data size
+    // 计算 xattr 数据大小
     fn xattr_data_size(&self) -> usize {
         if self.xattrs.is_empty() {
             return 0;
         }
-        // xattr ibody header (12 bytes) + entries
+        // xattr ibody header (12 字节) + 各条目
         let mut size = 12;
         for entry in &self.xattrs {
             size += entry.aligned_size();
@@ -236,7 +236,7 @@ impl InodeBuilder {
         size
     }
 
-    // Calculate xattr icount
+    // 计算 xattr icount
     fn xattr_icount(&self) -> u16 {
         if self.xattrs.is_empty() {
             return 0;
@@ -246,7 +246,7 @@ impl InodeBuilder {
         ((data_size - 12) / 4 + 1) as u16
     }
 
-    // Calculate total inode size (including xattr, inline data, compression header and index)
+    // 计算 inode 总大小 (包含 xattr, inline 数据, 压缩 map header 与索引)
     pub fn total_size(&self) -> usize {
         let base_size = if self.is_extended {
             EROFS_INODE_EXTENDED_SIZE
@@ -262,97 +262,97 @@ impl InodeBuilder {
         base_size + xattr_size + inline_size + compress_header_size + compress_indexes_size
     }
 
-    // Build compact inode (32 bytes)
+    // 构建 compact inode (32 字节)
     fn build_compact(&self) -> Vec<u8> {
         let mut buf = vec![0u8; EROFS_INODE_COMPACT_SIZE];
 
-        // i_format (offset 0, 2 bytes)
-        // bit 0: version (0 = compact)
-        // bit 1-3: data layout
+        // i_format (偏移 0, 2 字节)
+        // bit 0: 版本 (0 = compact)
+        // bit 1-3: 数据布局
         let i_format = (self.data_layout << 1) | EROFS_INODE_LAYOUT_COMPACT;
         buf[0..2].copy_from_slice(&i_format.to_le_bytes());
 
-        // i_xattr_icount (offset 2, 2 bytes)
+        // i_xattr_icount (偏移 2, 2 字节)
         buf[2..4].copy_from_slice(&self.xattr_icount().to_le_bytes());
 
-        // i_mode (offset 4, 2 bytes)
+        // i_mode (偏移 4, 2 字节)
         buf[4..6].copy_from_slice(&self.mode.to_le_bytes());
 
-        // i_nlink (offset 6, 2 bytes)
+        // i_nlink (偏移 6, 2 字节)
         buf[6..8].copy_from_slice(&(self.nlink as u16).to_le_bytes());
 
-        // i_size (offset 8, 4 bytes)
+        // i_size (偏移 8, 4 字节)
         buf[8..12].copy_from_slice(&(self.size as u32).to_le_bytes());
 
-        // i_reserved (offset 12, 4 bytes) - actually mtime
+        // i_reserved (偏移 12, 4 字节) - 实际存放 mtime
         buf[12..16].copy_from_slice(&(self.mtime as u32).to_le_bytes());
 
-        // i_u (offset 16, 4 bytes) - raw_blkaddr
+        // i_u (偏移 16, 4 字节) - raw_blkaddr
         buf[16..20].copy_from_slice(&self.raw_blkaddr.to_le_bytes());
 
-        // i_ino (offset 20, 4 bytes)
+        // i_ino (偏移 20, 4 字节)
         buf[20..24].copy_from_slice(&self.ino.to_le_bytes());
 
-        // i_uid (offset 24, 2 bytes)
+        // i_uid (偏移 24, 2 字节)
         buf[24..26].copy_from_slice(&(self.uid as u16).to_le_bytes());
 
-        // i_gid (offset 26, 2 bytes)
+        // i_gid (偏移 26, 2 字节)
         buf[26..28].copy_from_slice(&(self.gid as u16).to_le_bytes());
 
-        // i_reserved2 (offset 28, 4 bytes)
+        // i_reserved2 (偏移 28, 4 字节)
         buf[28..32].copy_from_slice(&0u32.to_le_bytes());
 
         buf
     }
 
-    // Build extended inode (64 bytes)
+    // 构建 extended inode (64 字节)
     fn build_extended(&self) -> Vec<u8> {
         let mut buf = vec![0u8; EROFS_INODE_EXTENDED_SIZE];
 
-        // i_format (offset 0, 2 bytes)
+        // i_format (偏移 0, 2 字节)
         let i_format = (self.data_layout << 1) | EROFS_INODE_LAYOUT_EXTENDED;
         buf[0..2].copy_from_slice(&i_format.to_le_bytes());
 
-        // i_xattr_icount (offset 2, 2 bytes)
+        // i_xattr_icount (偏移 2, 2 字节)
         buf[2..4].copy_from_slice(&self.xattr_icount().to_le_bytes());
 
-        // i_mode (offset 4, 2 bytes)
+        // i_mode (偏移 4, 2 字节)
         buf[4..6].copy_from_slice(&self.mode.to_le_bytes());
 
-        // i_reserved (offset 6, 2 bytes)
+        // i_reserved (偏移 6, 2 字节)
         buf[6..8].copy_from_slice(&0u16.to_le_bytes());
 
-        // i_size (offset 8, 8 bytes)
+        // i_size (偏移 8, 8 字节)
         buf[8..16].copy_from_slice(&self.size.to_le_bytes());
 
-        // i_u (offset 16, 4 bytes) - raw_blkaddr
+        // i_u (偏移 16, 4 字节) - raw_blkaddr
         buf[16..20].copy_from_slice(&self.raw_blkaddr.to_le_bytes());
 
-        // i_ino (offset 20, 4 bytes)
+        // i_ino (偏移 20, 4 字节)
         buf[20..24].copy_from_slice(&self.ino.to_le_bytes());
 
-        // i_uid (offset 24, 4 bytes)
+        // i_uid (偏移 24, 4 字节)
         buf[24..28].copy_from_slice(&self.uid.to_le_bytes());
 
-        // i_gid (offset 28, 4 bytes)
+        // i_gid (偏移 28, 4 字节)
         buf[28..32].copy_from_slice(&self.gid.to_le_bytes());
 
-        // i_mtime (offset 32, 8 bytes)
+        // i_mtime (偏移 32, 8 字节)
         buf[32..40].copy_from_slice(&self.mtime.to_le_bytes());
 
-        // i_mtime_nsec (offset 40, 4 bytes)
+        // i_mtime_nsec (偏移 40, 4 字节)
         buf[40..44].copy_from_slice(&self.mtime_nsec.to_le_bytes());
 
-        // i_nlink (offset 44, 4 bytes)
+        // i_nlink (偏移 44, 4 字节)
         buf[44..48].copy_from_slice(&self.nlink.to_le_bytes());
 
-        // i_reserved2 (offset 48, 16 bytes)
+        // i_reserved2 (偏移 48, 16 字节)
         buf[48..64].copy_from_slice(&[0u8; 16]);
 
         buf
     }
 
-    // Build xattr data
+    // 构建 xattr 数据
     fn build_xattr(&self) -> Vec<u8> {
         if self.xattrs.is_empty() {
             return Vec::new();
@@ -360,15 +360,15 @@ impl InodeBuilder {
 
         let mut buf = Vec::new();
 
-        // xattr ibody header (12 bytes)
-        // h_name_filter (4 bytes)
+        // xattr ibody header (12 字节)
+        // h_name_filter (4 字节)
         buf.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
-        // h_shared_count (1 byte)
+        // h_shared_count (1 字节)
         buf.push(0);
-        // h_reserved2 (7 bytes)
+        // h_reserved2 (7 字节)
         buf.extend_from_slice(&[0u8; 7]);
 
-        // xattr entries
+        // xattr 条目
         for entry in &self.xattrs {
             buf.extend_from_slice(&entry.to_bytes());
         }
@@ -376,7 +376,7 @@ impl InodeBuilder {
         buf
     }
 
-    // Build complete inode data
+    // 构建完整的 inode 数据
     pub fn build(&self) -> Result<Vec<u8>> {
         let mut buf = if self.is_extended {
             self.build_extended()
@@ -384,25 +384,25 @@ impl InodeBuilder {
             self.build_compact()
         };
 
-        // Add xattr data
+        // 追加 xattr 数据
         buf.extend_from_slice(&self.build_xattr());
 
-        // Add compression header (if any)
-        // Compressed metadata needs to be aligned to 8-byte boundaries
+        // 追加压缩 map header (若存在)
+        // 压缩元数据需要对齐到 8 字节边界
         if let Some(ref header) = self.compress_header {
-            // Aligned to 8 bytes
+            // 对齐到 8 字节
             while buf.len() % 8 != 0 {
                 buf.push(0);
             }
             buf.extend_from_slice(header);
         }
 
-        // Add compressed index (if any)
+        // 追加压缩索引 (若存在)
         if let Some(ref indexes) = self.compress_indexes {
             buf.extend_from_slice(indexes);
         }
 
-        // Add inline data
+        // 追加 inline 数据
         if let Some(ref data) = self.inline_data {
             buf.extend_from_slice(data);
         }

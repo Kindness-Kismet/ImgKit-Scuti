@@ -1,4 +1,4 @@
-// F2FS error type definitions
+// F2FS 错误类型定义
 
 use thiserror::Error;
 

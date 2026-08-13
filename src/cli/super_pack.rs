@@ -1,5 +1,5 @@
-// Super partition pack command.
-// Packs multiple partition images into a Super partition image.
+// super 分区打包命令
+// 将多个分区镜像打包为 super 分区镜像
 
 use crate::container::super_partition::{
     self, BlockDeviceInfo, GroupInfo, LP_METADATA_GEOMETRY_SIZE, LP_PARTITION_ATTR_READONLY,
@@ -9,7 +9,7 @@ use anyhow::{Result, anyhow};
 use std::collections::HashMap;
 use std::path::Path;
 
-// Pack a Super partition image
+// 打包 super 分区镜像
 #[allow(clippy::too_many_arguments)]
 pub fn run_super_pack(
     output: &str,
@@ -28,7 +28,7 @@ pub fn run_super_pack(
     force_full_image: bool,
     sparse: bool,
 ) -> Result<()> {
-    // Parse partition definitions
+    // 解析分区定义
     let mut partition_infos: Vec<(String, u32, u64, String)> = Vec::new();
     for p in partitions {
         let parts: Vec<&str> = p.split(':').collect();
@@ -60,7 +60,7 @@ pub fn run_super_pack(
         partition_infos.push((name, attrs, size, group));
     }
 
-    // Parse image mappings
+    // 解析镜像映射
     let mut image_map: HashMap<String, String> = HashMap::new();
     for img in images {
         let parts: Vec<&str> = img.splitn(2, '=').collect();
@@ -70,11 +70,11 @@ pub fn run_super_pack(
         image_map.insert(parts[0].to_string(), parts[1].to_string());
     }
 
-    // Calculate device size
+    // 计算设备大小
     let alignment_u64 = alignment as u64;
     let calculated_device_size = match device_size.as_deref() {
         Some("auto") | None => {
-            // Auto-calculate: metadata area + partition data (each partition aligned)
+            // 自动计算: 元数据区 + 分区数据 (每个分区按对齐取整)
             let metadata_area = LP_PARTITION_RESERVED_BYTES
                 + LP_METADATA_GEOMETRY_SIZE * 2
                 + metadata_size as u64 * slots as u64 * 2;
@@ -100,13 +100,13 @@ pub fn run_super_pack(
         calculated_device_size as f64 / 1024.0 / 1024.0
     );
 
-    // Create builder
+    // 创建构建器
     let block_device = BlockDeviceInfo::new(super_name, calculated_device_size)
         .with_alignment(alignment, alignment_offset)
         .with_block_size(block_size);
     let mut builder = MetadataBuilder::new(vec![block_device], metadata_size, slots)?;
 
-    // Set flags
+    // 设置标志位
     if auto_slot_suffixing {
         builder.set_auto_slot_suffixing();
     }
@@ -114,7 +114,7 @@ pub fn run_super_pack(
         builder.set_virtual_ab_device_flag();
     }
 
-    // Add partition groups
+    // 添加分区组
     for g in groups {
         let parts: Vec<&str> = g.split(':').collect();
         if parts.len() != 2 {
@@ -130,7 +130,7 @@ pub fn run_super_pack(
         builder.add_group(GroupInfo::new(name, max_size))?;
     }
 
-    // Add partitions
+    // 添加分区
     for (name, attrs, size, group) in &partition_infos {
         let mut partition = PartitionInfo::new(name, group, *size);
         partition.attributes = *attrs;
@@ -143,10 +143,10 @@ pub fn run_super_pack(
         );
     }
 
-    // Export metadata
+    // 导出元数据
     let metadata = builder.export()?;
 
-    // Write image
+    // 写入镜像
     let output_path = Path::new(output);
     if force_full_image || !image_map.is_empty() {
         if sparse {

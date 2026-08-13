@@ -1,10 +1,10 @@
-// LZ4 decompression implementation
+// LZ4 解压缩实现
 
 use super::{CompressionError, Compressor, Decompressor, Result};
 use std::os::raw::{c_char, c_int};
 
-// FFI binding: LZ4_compress_destSize
-// This function is not exported in lz4-sys and needs to be manually bound.
+// FFI 绑定: LZ4_compress_destSize
+// 该函数未在 lz4-sys 中导出, 需要手动绑定
 unsafe extern "C" {
     // int LZ4_compress_destSize(const char* src, char* dst, int* srcSizePtr, int targetDstSize, int acceleration);
     fn LZ4_compress_destSize(
@@ -29,20 +29,20 @@ unsafe extern "C" {
     fn LZ4_sizeofStateHC() -> c_int;
 }
 
-// LZ4 standard decompressor
+// LZ4 标准解压器
 pub struct Lz4Decompressor;
 
 impl Decompressor for Lz4Decompressor {
     fn decompress(&self, compressed: &[u8], decompressed_size: usize) -> Result<Vec<u8>> {
-        // Try using lz4 official library
+        // 优先尝试 lz4 官方库
         if let Ok(decompressed) = lz4::block::decompress(compressed, Some(decompressed_size as i32))
         {
             return Ok(decompressed);
         }
 
-        // Fallback to lz4_flex
+        // 回退到 lz4_flex
         lz4_flex::decompress(compressed, decompressed_size)
-            .map_err(|e| CompressionError::new(format!("LZ4 解压缩失败: {}", e)))
+            .map_err(|e| CompressionError::new(format!("LZ4 decompression failed: {}", e)))
     }
 
     fn name(&self) -> &'static str {
@@ -50,12 +50,12 @@ impl Decompressor for Lz4Decompressor {
     }
 }
 
-// LZ4HC decompressor (the same decompression process as LZ4, but the compression algorithm is different)
+// LZ4HC 解压器 (解压流程与 LZ4 相同, 仅压缩算法不同)
 pub struct Lz4HcDecompressor;
 
 impl Decompressor for Lz4HcDecompressor {
     fn decompress(&self, compressed: &[u8], decompressed_size: usize) -> Result<Vec<u8>> {
-        // LZ4HC decompression is the same as LZ4
+        // LZ4HC 的解压过程与 LZ4 完全一致
         Lz4Decompressor.decompress(compressed, decompressed_size)
     }
 
@@ -64,7 +64,7 @@ impl Decompressor for Lz4HcDecompressor {
     }
 }
 
-// LZ4 decompressor supporting ZERO_PADDING feature (for EROFS)
+// 支持 ZERO_PADDING 特性的 LZ4 解压器 (用于 EROFS)
 pub struct Lz4ZeroPaddingDecompressor {
     pub skip_zero_padding: bool,
 }
@@ -96,16 +96,16 @@ impl Decompressor for Lz4ZeroPaddingDecompressor {
     fn decompress(&self, compressed: &[u8], decompressed_size: usize) -> Result<Vec<u8>> {
         let start = self.find_data_start(compressed);
 
-        // Try lz4 official library
+        // 优先尝试 lz4 官方库
         if let Ok(decompressed) =
             lz4::block::decompress(&compressed[start..], Some(decompressed_size as i32))
         {
             return Ok(decompressed);
         }
 
-        // Fallback to lz4_flex
+        // 回退到 lz4_flex
         lz4_flex::decompress(&compressed[start..], decompressed_size)
-            .map_err(|e| CompressionError::new(format!("LZ4 解压缩失败: {}", e)))
+            .map_err(|e| CompressionError::new(format!("LZ4 decompression failed: {}", e)))
     }
 
     fn name(&self) -> &'static str {
@@ -113,13 +113,13 @@ impl Decompressor for Lz4ZeroPaddingDecompressor {
     }
 }
 
-// LZ4 compressor
+// LZ4 压缩器
 pub struct Lz4Compressor;
 
 impl Compressor for Lz4Compressor {
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>> {
         lz4::block::compress(data, None, false)
-            .map_err(|e| CompressionError::new(format!("LZ4 压缩失败: {}", e)))
+            .map_err(|e| CompressionError::new(format!("LZ4 compression failed: {}", e)))
     }
 
     fn compress_destsize(&self, data: &[u8], max_output_size: usize) -> Option<(Vec<u8>, usize)> {
@@ -127,7 +127,7 @@ impl Compressor for Lz4Compressor {
             return None;
         }
 
-        // Use native LZ4_compress_destSize FFI
+        // 直接使用原生的 LZ4_compress_destSize FFI
         let mut src_size = data.len() as c_int;
         let mut dst = vec![0u8; max_output_size];
 
@@ -137,7 +137,7 @@ impl Compressor for Lz4Compressor {
                 dst.as_mut_ptr() as *mut c_char,
                 &mut src_size,
                 max_output_size as c_int,
-                1, // acceleration = 1 (default)
+                1, // acceleration = 1 (默认值)
             )
         };
 
@@ -154,7 +154,7 @@ impl Compressor for Lz4Compressor {
     }
 }
 
-// LZ4HC compressor (high compression ratio)
+// LZ4HC 压缩器 (高压缩率)
 pub struct Lz4HcCompressor {
     pub level: i32,
 }
@@ -172,7 +172,7 @@ impl Compressor for Lz4HcCompressor {
             Some(lz4::block::CompressionMode::HIGHCOMPRESSION(self.level)),
             false,
         )
-        .map_err(|e| CompressionError::new(format!("LZ4HC 压缩失败: {}", e)))
+        .map_err(|e| CompressionError::new(format!("LZ4HC compression failed: {}", e)))
     }
 
     fn compress_destsize(&self, data: &[u8], max_output_size: usize) -> Option<(Vec<u8>, usize)> {
@@ -180,7 +180,7 @@ impl Compressor for Lz4HcCompressor {
             return None;
         }
 
-        // Use native LZ4_compress_HC_destSize FFI
+        // 直接使用原生的 LZ4_compress_HC_destSize FFI
         let state_size = unsafe { LZ4_sizeofStateHC() } as usize;
         let mut state = vec![0u8; state_size];
 

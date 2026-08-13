@@ -1,6 +1,6 @@
-// LP (Logical Partition) metadata writer
+// LP (Logical Partition) 元数据写入器
 //
-// Reference Android source code liblp/writer.cpp
+// 参考 Android 源码 liblp/writer.cpp
 
 use crate::container::sparse::SparseWriter;
 use crate::container::super_partition::format::*;
@@ -10,7 +10,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-// Calculate SHA256 checksum
+// 计算 SHA256 校验和
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -20,7 +20,7 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
     checksum
 }
 
-// Serialized geometry information
+// 序列化 geometry 信息
 pub fn serialize_geometry(geometry: &LpMetadataGeometry) -> Vec<u8> {
     let mut geo = geometry.clone();
     geo.checksum = [0u8; 32];
@@ -29,9 +29,9 @@ pub fn serialize_geometry(geometry: &LpMetadataGeometry) -> Vec<u8> {
     geo.to_bytes()
 }
 
-// Serialization metadata
+// 序列化 metadata
 pub fn serialize_metadata(metadata: &LpMetadata) -> Vec<u8> {
-    // Serialize individual tables
+    // 分别序列化各张表
     let partitions_data: Vec<u8> = metadata
         .partitions
         .iter()
@@ -45,24 +45,24 @@ pub fn serialize_metadata(metadata: &LpMetadata) -> Vec<u8> {
         .flat_map(|b| b.to_bytes())
         .collect();
 
-    // Calculate table offset
+    // 计算各张表的偏移
     let partitions_offset = 0u32;
     let extents_offset = partitions_offset + partitions_data.len() as u32;
     let groups_offset = extents_offset + extents_data.len() as u32;
     let block_devices_offset = groups_offset + groups_data.len() as u32;
     let tables_size = block_devices_offset + block_devices_data.len() as u32;
 
-    // Merge table data
+    // 合并表数据
     let mut tables_data = Vec::new();
     tables_data.extend(&partitions_data);
     tables_data.extend(&extents_data);
     tables_data.extend(&groups_data);
     tables_data.extend(&block_devices_data);
 
-    // Calculate table checksum
+    // 计算表数据的校验和
     let tables_checksum = sha256(&tables_data);
 
-    // Build the header
+    // 构建 metadata header
     let mut header = metadata.header.clone();
     header.partitions.offset = partitions_offset;
     header.partitions.num_entries = metadata.partitions.len() as u32;
@@ -79,35 +79,35 @@ pub fn serialize_metadata(metadata: &LpMetadata) -> Vec<u8> {
     header.tables_size = tables_size;
     header.tables_checksum = tables_checksum;
 
-    // Calculate header checksum
+    // 计算 header 校验和
     header.header_checksum = [0u8; 32];
     let header_bytes = header.to_bytes();
     header.header_checksum = sha256(&header_bytes);
 
-    // Return header + table data
+    // 返回 header 加表数据
     let mut result = header.to_bytes();
     result.extend(tables_data);
     result
 }
 
-// Get the main geometry information offset
+// 获取主 geometry 的偏移
 pub fn get_primary_geometry_offset() -> u64 {
     LP_PARTITION_RESERVED_BYTES
 }
 
-// Get backup geometry information offset
+// 获取备份 geometry 的偏移
 pub fn get_backup_geometry_offset() -> u64 {
     get_primary_geometry_offset() + LP_METADATA_GEOMETRY_SIZE
 }
 
-// Get master metadata offset
+// 获取主 metadata 的偏移
 pub fn get_primary_metadata_offset(geometry: &LpMetadataGeometry, slot_number: u32) -> u64 {
     LP_PARTITION_RESERVED_BYTES
         + LP_METADATA_GEOMETRY_SIZE * 2
         + geometry.metadata_max_size as u64 * slot_number as u64
 }
 
-// Get backup metadata offset
+// 获取备份 metadata 的偏移
 pub fn get_backup_metadata_offset(geometry: &LpMetadataGeometry, slot_number: u32) -> u64 {
     let start = LP_PARTITION_RESERVED_BYTES
         + LP_METADATA_GEOMETRY_SIZE * 2
@@ -115,53 +115,53 @@ pub fn get_backup_metadata_offset(geometry: &LpMetadataGeometry, slot_number: u3
     start + geometry.metadata_max_size as u64 * slot_number as u64
 }
 
-// Get total metadata size
+// 获取 metadata 区域的总大小
 pub fn get_total_metadata_size(metadata_max_size: u32, max_slots: u32) -> u64 {
     LP_PARTITION_RESERVED_BYTES
         + (LP_METADATA_GEOMETRY_SIZE + metadata_max_size as u64 * max_slots as u64) * 2
 }
 
-// Write an empty image file (metadata only, lpmake-compatible format)
+// 写出空镜像文件 (仅含 metadata, 与 lpmake 输出格式兼容)
 pub fn write_empty_image(path: &Path, metadata: &LpMetadata) -> Result<()> {
-    let mut file = File::create(path).with_context(|| format!("创建输出文件失败: {:?}", path))?;
+    let mut file = File::create(path).with_context(|| format!("failed to create: {:?}", path))?;
 
-    // Empty image format: geometry information + metadata (no reserved area)
+    // 空镜像格式: geometry 信息加 metadata (不含保留区)
     let geometry_data = serialize_geometry(&metadata.geometry);
     file.write_all(&geometry_data)?;
 
-    // Write metadata
+    // 写入 metadata
     let metadata_blob = serialize_metadata(metadata);
     file.write_all(&metadata_blob)?;
 
     Ok(())
 }
 
-// Write full image file (metadata only, used to flash the device)
+// 写出完整镜像文件 (仅含 metadata, 用于刷入设备)
 pub fn write_to_image_file(path: &Path, metadata: &LpMetadata) -> Result<()> {
-    let mut file = File::create(path).with_context(|| format!("创建输出文件失败: {:?}", path))?;
+    let mut file = File::create(path).with_context(|| format!("failed to create: {:?}", path))?;
 
-    // Write to reserved area (all zeros)
+    // 写入保留区 (全零)
     let reserved = vec![0u8; LP_PARTITION_RESERVED_BYTES as usize];
     file.write_all(&reserved)?;
 
-    // Write main geometry information
+    // 写入主 geometry 信息
     let geometry_data = serialize_geometry(&metadata.geometry);
     file.write_all(&geometry_data)?;
 
-    // Write backup geometry information
+    // 写入备份 geometry 信息
     file.write_all(&geometry_data)?;
 
-    // Write metadata
+    // 写入 metadata
     let metadata_blob = serialize_metadata(metadata);
     let mut padded_metadata = metadata_blob.clone();
     padded_metadata.resize(metadata.geometry.metadata_max_size as usize, 0);
 
-    // Write primary metadata (per slot)
+    // 逐个 slot 写入主 metadata
     for _ in 0..metadata.geometry.metadata_slot_count {
         file.write_all(&padded_metadata)?;
     }
 
-    // Write backup metadata
+    // 写入备份 metadata
     for _ in 0..metadata.geometry.metadata_slot_count {
         file.write_all(&padded_metadata)?;
     }
@@ -169,35 +169,35 @@ pub fn write_to_image_file(path: &Path, metadata: &LpMetadata) -> Result<()> {
     Ok(())
 }
 
-// Write the complete image file (including partition data)
+// 写出完整镜像文件 (包含分区数据)
 pub fn write_to_image_file_with_data(
     path: &Path,
     metadata: &LpMetadata,
     images: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
     if metadata.block_devices.is_empty() {
-        anyhow::bail!("没有块设备");
+        anyhow::bail!("no block devices");
     }
 
     let device_size = metadata.block_devices[0].size;
-    let mut file = File::create(path).with_context(|| format!("创建输出文件失败: {:?}", path))?;
+    let mut file = File::create(path).with_context(|| format!("failed to create: {:?}", path))?;
 
-    // Preallocated file size
+    // 预分配文件大小
     file.set_len(device_size)?;
 
-    // Write to reserved area (all zeros)
+    // 写入保留区 (全零)
     file.seek(SeekFrom::Start(0))?;
     let reserved = vec![0u8; LP_PARTITION_RESERVED_BYTES as usize];
     file.write_all(&reserved)?;
 
-    // Write main geometry information
+    // 写入主 geometry 信息
     let geometry_data = serialize_geometry(&metadata.geometry);
     file.write_all(&geometry_data)?;
 
-    // Write backup geometry information
+    // 写入备份 geometry 信息
     file.write_all(&geometry_data)?;
 
-    // Write metadata
+    // 写入 metadata
     let metadata_blob = serialize_metadata(metadata);
     let mut padded_metadata = metadata_blob.clone();
     padded_metadata.resize(metadata.geometry.metadata_max_size as usize, 0);
@@ -210,7 +210,7 @@ pub fn write_to_image_file_with_data(
         file.write_all(&padded_metadata)?;
     }
 
-    // Write partition data
+    // 写入分区数据
     for partition in &metadata.partitions {
         let partition_name = partition.get_name();
         if let Some(image_path) = images.get(&partition_name) {
@@ -228,7 +228,7 @@ pub fn write_to_image_file_with_data(
                 let extent_size = extent.num_sectors * LP_SECTOR_SIZE;
 
                 let mut src = File::open(image_path)
-                    .with_context(|| format!("打开镜像文件失败: {}", image_path))?;
+                    .with_context(|| format!("failed to open image file: {}", image_path))?;
 
                 file.seek(SeekFrom::Start(offset))?;
 
@@ -238,7 +238,7 @@ pub fn write_to_image_file_with_data(
                     let to_read = std::cmp::min(buffer.len() as u64, remaining) as usize;
                     let bytes_read = src.read(&mut buffer[..to_read])?;
                     if bytes_read == 0 {
-                        // End of file, remainder is already zero (because file was pre-allocated)
+                        // 文件已读完, 剩余部分已是零 (文件为预分配)
                         break;
                     }
                     file.write_all(&buffer[..bytes_read])?;
@@ -251,31 +251,31 @@ pub fn write_to_image_file_with_data(
     Ok(())
 }
 
-// Construct metadata area (reserved area + geometric information + metadata)
+// 构建 metadata 区域 (保留区加 geometry 信息加 metadata)
 fn build_metadata_region(metadata: &LpMetadata) -> Vec<u8> {
     let mut data = Vec::new();
 
-    // reserved area
+    // 保留区
     data.extend(vec![0u8; LP_PARTITION_RESERVED_BYTES as usize]);
 
-    // Main geometry information
+    // 主 geometry 信息
     let geometry_data = serialize_geometry(&metadata.geometry);
     data.extend(&geometry_data);
 
-    // Back up geometry information
+    // 备份 geometry 信息
     data.extend(&geometry_data);
 
-    // metadata
+    // metadata 数据
     let metadata_blob = serialize_metadata(metadata);
     let mut padded_metadata = metadata_blob.clone();
     padded_metadata.resize(metadata.geometry.metadata_max_size as usize, 0);
 
-    // master metadata
+    // 主 metadata
     for _ in 0..metadata.geometry.metadata_slot_count {
         data.extend(&padded_metadata);
     }
 
-    // Backup metadata
+    // 备份 metadata
     for _ in 0..metadata.geometry.metadata_slot_count {
         data.extend(&padded_metadata);
     }
@@ -283,28 +283,28 @@ fn build_metadata_region(metadata: &LpMetadata) -> Vec<u8> {
     data
 }
 
-// Write sparse empty image (metadata only)
+// 写出 sparse image 空镜像 (仅含 metadata)
 pub fn write_sparse_empty_image(path: &Path, metadata: &LpMetadata, block_size: u32) -> Result<()> {
     if metadata.block_devices.is_empty() {
-        anyhow::bail!("没有块设备");
+        anyhow::bail!("no block devices");
     }
 
     let device_size = metadata.block_devices[0].size;
     let total_blocks = (device_size / block_size as u64) as u32;
 
-    // Build metadata area
+    // 构建 metadata 区域
     let metadata_data = build_metadata_region(metadata);
     let metadata_blocks = (metadata_data.len() as u64).div_ceil(block_size as u64) as u32;
 
-    // Calculate remaining space
+    // 计算剩余空间
     let remaining_blocks = total_blocks - metadata_blocks;
 
     let mut writer = SparseWriter::new(path, block_size, total_blocks)?;
 
-    // Add metadata RAW chunk
+    // 添加 metadata 的 raw chunk
     writer.add_raw_chunk(metadata_data);
 
-    // Add remaining space DONT_CARE chunk
+    // 剩余空间使用 dont-care chunk 填充
     if remaining_blocks > 0 {
         writer.add_dont_care_chunk(remaining_blocks);
     }
@@ -312,7 +312,7 @@ pub fn write_sparse_empty_image(path: &Path, metadata: &LpMetadata, block_size: 
     writer.write()
 }
 
-// Write to a sparse image (containing partition data)
+// 写出 sparse image (包含分区数据)
 pub fn write_to_sparse_image_file_with_data(
     path: &Path,
     metadata: &LpMetadata,
@@ -320,13 +320,13 @@ pub fn write_to_sparse_image_file_with_data(
     block_size: u32,
 ) -> Result<()> {
     if metadata.block_devices.is_empty() {
-        anyhow::bail!("没有块设备");
+        anyhow::bail!("no block devices");
     }
 
     let device_size = metadata.block_devices[0].size;
     let total_blocks = (device_size / block_size as u64) as u32;
 
-    // Collect partition data block information
+    // 收集分区数据块信息
     struct PartitionBlock {
         offset: u64,
         size: u64,
@@ -357,24 +357,24 @@ pub fn write_to_sparse_image_file_with_data(
         }
     }
 
-    // Sort by offset
+    // 按偏移排序
     partition_blocks.sort_by_key(|b| b.offset);
 
-    // Build metadata area
+    // 构建 metadata 区域
     let metadata_data = build_metadata_region(metadata);
     let metadata_size = metadata_data.len() as u64;
     let metadata_aligned_size = metadata_size.div_ceil(block_size as u64) * block_size as u64;
 
     let mut writer = SparseWriter::new(path, block_size, total_blocks)?;
 
-    // Add metadata RAW chunk
+    // 添加 metadata 的 raw chunk
     writer.add_raw_chunk(metadata_data);
 
     let mut current_offset = metadata_aligned_size;
 
-    // Process partition data blocks
+    // 处理分区数据块
     for block in &partition_blocks {
-        // fill gaps
+        // 填补空洞
         if block.offset > current_offset {
             let gap_blocks = ((block.offset - current_offset) / block_size as u64) as u32;
             if gap_blocks > 0 {
@@ -382,12 +382,12 @@ pub fn write_to_sparse_image_file_with_data(
             }
         }
 
-        // Add partition data
+        // 添加分区数据
         writer.add_file_chunk(&block.image_path, block.size);
         current_offset = block.offset + block.size;
     }
 
-    // pad to end of device
+    // 补齐到设备末尾
     if current_offset < device_size {
         let remaining_blocks = ((device_size - current_offset) / block_size as u64) as u32;
         if remaining_blocks > 0 {

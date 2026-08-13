@@ -1,47 +1,47 @@
-// F2FS NAT (Node Address Table) Manager
+// F2FS NAT (node address table) 管理器
 use crate::filesystem::f2fs::consts::*;
 //
-// Responsible for managing the node address table and tracking the block address corresponding to each NID.
+// 负责管理 node address table, 跟踪每个 NID 对应的块地址.
 
 use crate::filesystem::f2fs::Result;
 use crate::filesystem::f2fs::types::*;
 use std::collections::HashMap;
 use std::io::Write;
 
-// NAT manager
+// NAT 管理器
 #[derive(Debug)]
 pub struct NatManager {
-    // NAT entry mapping
+    // NAT 条目映射
     entries: HashMap<u32, NatEntry>,
-    // Next available NID
+    // 下一个可用的 NID
     next_nid: u32,
-    // NAT area starting block address
+    // NAT 区域起始块地址
     nat_blkaddr: u32,
 }
 
 impl NatManager {
-    // Create a new NAT manager
+    // 创建新的 NAT 管理器
     pub fn new(nat_blkaddr: u32, _nat_segments: u32) -> Self {
         NatManager {
             entries: HashMap::new(),
-            next_nid: F2FS_FIRST_INO, // Starting from 4, 0-3 are reserved
+            next_nid: F2FS_FIRST_INO, // 从 4 开始, 0-3 为保留值
             nat_blkaddr,
         }
     }
 
-    // Assign new NID
+    // 分配新的 NID
     pub fn alloc_nid(&mut self) -> Nid {
         let nid = self.next_nid;
         self.next_nid += 1;
         Nid(nid)
     }
 
-    // Get the next available NID (not assigned)
+    // 获取下一个可用的 NID (尚未分配)
     pub fn next_free_nid(&self) -> u32 {
         self.next_nid
     }
 
-    // Set up NAT entries
+    // 设置 NAT 条目
     pub fn set_entry(&mut self, nid: Nid, block_addr: u32, ino: u32) {
         let entry = NatEntry {
             version: 0,
@@ -51,42 +51,42 @@ impl NatManager {
         self.entries.insert(nid.0, entry);
     }
 
-    // Get NAT entries
+    // 获取 NAT 条目
     pub fn get_entry(&self, nid: Nid) -> Option<&NatEntry> {
         self.entries.get(&nid.0)
     }
 
-    // Get block address
+    // 获取块地址
     pub fn get_block_addr(&self, nid: Nid) -> Option<u32> {
         self.entries.get(&nid.0).map(|e| e.block_addr.0)
     }
 
-    // Check if NID is assigned
+    // 检查 NID 是否已分配
     pub fn is_allocated(&self, nid: Nid) -> bool {
         self.entries.contains_key(&nid.0)
     }
 
-    // Get the number of allocated entries
+    // 获取已分配的条目数量
     pub fn entry_count(&self) -> usize {
         self.entries.len()
     }
 
-    // Get NAT area starting block address
+    // 获取 NAT 区域起始块地址
     pub fn nat_blkaddr(&self) -> u32 {
         self.nat_blkaddr
     }
 
-    // Calculate the number of blocks required for a NAT zone
+    // 计算 NAT 区域所需的块数量
     pub fn nat_blocks_needed(&self) -> u32 {
-        // Need to cover all possible NIDs
+        // 需要覆盖所有可能的 NID
         let max_nid = self.next_nid;
         (max_nid).div_ceil(NAT_ENTRY_PER_BLOCK as u32)
     }
 
-    // Initialize reserved inodes (node_ino, meta_ino, root_ino)
-    // node_ino and meta_ino are virtual inodes, block_addr=1 indicates special tags
+    // 初始化保留 inode (node_ino, meta_ino, root_ino)
+    // node_ino 与 meta_ino 为虚拟 inode, block_addr=1 表示特殊标记
     pub fn init_reserved_inodes(&mut self, root_blkaddr: u32) {
-        // node_ino (NID 1) - virtual inode, block_addr=1 indicates special tag
+        // node_ino (NID 1) - 虚拟 inode, block_addr=1 表示特殊标记
         self.entries.insert(
             F2FS_NODE_INO,
             NatEntry {
@@ -96,7 +96,7 @@ impl NatManager {
             },
         );
 
-        // meta_ino (NID 2) - virtual inode, block_addr=1 indicates special tag
+        // meta_ino (NID 2) - 虚拟 inode, block_addr=1 表示特殊标记
         self.entries.insert(
             F2FS_META_INO,
             NatEntry {
@@ -106,7 +106,7 @@ impl NatManager {
             },
         );
 
-        // root_ino (NID 3) - root inode
+        // root_ino (NID 3) - 根 inode
         self.entries.insert(
             F2FS_ROOT_INO,
             NatEntry {
@@ -117,7 +117,7 @@ impl NatManager {
         );
     }
 
-    // Serialize NAT zone to writer
+    // 将 NAT 区域序列化到 writer
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let blocks_needed = self.nat_blocks_needed() as usize;
 
@@ -140,7 +140,7 @@ impl NatManager {
         Ok(())
     }
 
-    // Generate byte data for NAT zone
+    // 生成 NAT 区域的字节数据
     pub fn to_bytes(&self) -> Vec<u8> {
         let blocks_needed = self.nat_blocks_needed() as usize;
         let mut data = vec![0u8; blocks_needed * F2FS_BLKSIZE];
@@ -159,14 +159,14 @@ impl NatManager {
         data
     }
 
-    // Generate NAT bitmap (for checkpointing)
+    // 生成 NAT bitmap (供 checkpoint 使用)
     pub fn generate_bitmap(&self) -> Vec<u8> {
-        // NAT bitmap marks which NAT blocks are valid
+        // NAT bitmap 标记哪些 NAT 块有效
         let blocks_needed = self.nat_blocks_needed();
         let bitmap_size = (blocks_needed as usize).div_ceil(8);
         let mut bitmap = vec![0u8; bitmap_size];
 
-        // Mark blocks containing valid entries
+        // 标记包含有效条目的块
         for &nid in self.entries.keys() {
             let block_idx = nid as usize / NAT_ENTRY_PER_BLOCK;
             let byte_idx = block_idx / 8;
@@ -219,16 +219,16 @@ mod tests {
         let mut manager = NatManager::new(1024, 4);
         manager.init_reserved_inodes(3000);
 
-        // Check root_ino
+        // 检查 root_ino
         let root_entry = manager.get_entry(Nid(F2FS_ROOT_INO)).unwrap();
         assert_eq!(root_entry.block_addr.0, 3000);
         assert_eq!(root_entry.ino, F2FS_ROOT_INO);
 
-        // Check node_ino
+        // 检查 node_ino
         let node_entry = manager.get_entry(Nid(F2FS_NODE_INO)).unwrap();
         assert_eq!(node_entry.ino, F2FS_NODE_INO);
 
-        // Check meta_ino
+        // 检查 meta_ino
         let meta_entry = manager.get_entry(Nid(F2FS_META_INO)).unwrap();
         assert_eq!(meta_entry.ino, F2FS_META_INO);
     }
@@ -241,7 +241,7 @@ mod tests {
         let data = manager.to_bytes();
         assert!(!data.is_empty());
 
-        // Verify root_ino entry
+        // 校验 root_ino 条目
         let root_offset = F2FS_ROOT_INO as usize * NAT_ENTRY_SIZE;
         let entry = NatEntry::from_bytes(&data[root_offset..root_offset + NAT_ENTRY_SIZE]).unwrap();
         assert_eq!(entry.block_addr.0, 3000);

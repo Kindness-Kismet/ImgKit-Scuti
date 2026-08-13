@@ -1,6 +1,6 @@
-// F2FS write module
+// F2FS 写入模块
 //
-// Provides writing capabilities required for F2FS image building
+// 提供构建 F2FS 镜像所需的写入能力
 
 mod builder;
 mod checkpoint;

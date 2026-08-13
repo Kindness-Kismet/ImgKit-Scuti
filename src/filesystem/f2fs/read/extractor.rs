@@ -1,6 +1,6 @@
-// F2FS file extractor
+// F2FS 文件提取器
 //
-// Provides file system extraction and configuration generation functions
+// 提供文件系统提取与配置文件生成功能
 
 use crate::container::sparse::SparseReader;
 use crate::filesystem::f2fs::{F2fsVolume, Inode, Nid};
@@ -19,19 +19,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
-// Extract configuration
+// 提取配置
 pub struct ExtractConfig {
-    // Enter the image file path
+    // 输入镜像文件路径
     pub input_image: String,
-    // Output base directory
+    // 输出根目录
     pub output_dir: String,
-    // Custom fs_config path (optional)
+    // 自定义 fs_config 路径 (可选)
     pub fs_config_path: Option<String>,
-    // Custom file_contexts path (optional)
+    // 自定义 file_contexts 路径 (可选)
     pub file_contexts_path: Option<String>,
 }
 
-// File extraction task
+// 文件提取任务
 #[derive(Clone)]
 struct FileTask {
     inode: Inode,
@@ -41,16 +41,16 @@ struct FileTask {
     file_type: u8,
 }
 
-// Entry point: auto-detect sparse vs raw image and dispatch to the matching reader
+// 入口: 自动识别 sparse 与 raw 镜像并分派到对应的读取实现
 pub fn extract_image(config: ExtractConfig) -> Result<()> {
     if let Ok(sparse_reader) = SparseReader::new(&config.input_image) {
         let volume = F2fsVolume::from_reader(sparse_reader)
-            .map_err(|e| anyhow::anyhow!("解析 sparse F2FS superblock 失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("failed to parse sparse F2FS superblock: {}", e))?;
         return extract(config, volume, true);
     }
 
     let volume = F2fsVolume::new(&config.input_image)
-        .map_err(|e| anyhow::anyhow!("打开 F2FS 镜像失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to open F2FS image: {}", e))?;
     extract(config, volume, false)
 }
 
@@ -61,7 +61,7 @@ fn extract<R: Read + Seek + Send + Sync>(
 ) -> Result<()> {
     let start_time = Instant::now();
 
-    // Detect partition name
+    // 识别分区名
     let partition_name = Path::new(&config.input_image)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -72,7 +72,7 @@ fn extract<R: Read + Seek + Send + Sync>(
         .and_then(|s| s.to_str())
         .unwrap_or("unknown");
 
-    // Create output directory structure
+    // 创建输出目录结构
     let output_base = PathBuf::from(&config.output_dir);
     let extract_path = output_base.join(&partition_name);
     let config_dir = output_base.join("config");
@@ -82,14 +82,14 @@ fn extract<R: Read + Seek + Send + Sync>(
     let case_sensitive = is_case_sensitive_directory(&extract_path)?;
     let mut case_map = HashMap::new();
 
-    // Extract file system
+    // 提取文件系统
     let root_nid = Nid(3);
 
-    // Store fs_config and file_contexts data
+    // 保存 fs_config 与 file_contexts 数据
     let mut fs_config = Vec::new();
     let mut file_contexts = HashMap::new();
 
-    // Extract xattr of root directory (consistent with EXT4/EROFS)
+    // 提取根目录的 xattr (与 EXT4/EROFS 保持一致)
     let root_node = volume.read_node(root_nid)?;
     let root_inode = Inode::from_bytes(&root_node)?;
     fs_config.push((
@@ -108,7 +108,7 @@ fn extract<R: Read + Seek + Send + Sync>(
         &mut file_contexts,
     );
 
-    // Phase One: Collect all file tasks in traversal order
+    // 第一阶段: 按遍历顺序收集所有文件任务
     let mut file_tasks = Vec::new();
     let mut visited = std::collections::HashSet::new();
     collect_directory_tasks(
@@ -124,7 +124,7 @@ fn extract<R: Read + Seek + Send + Sync>(
         &mut file_contexts,
     )?;
 
-    // Phase 2: Process all files in parallel
+    // 第二阶段: 并行处理所有文件
     let image_path_arc = Arc::new(config.input_image.clone());
     let extracted_count = Arc::new(AtomicUsize::new(0));
     let failed_count = Arc::new(AtomicUsize::new(0));
@@ -140,25 +140,25 @@ fn extract<R: Read + Seek + Send + Sync>(
                         }
                         create_symlink(&link_target, &$task.output_path)
                     }
-                    Err(e) => Err(anyhow::anyhow!("读取符号链接目标失败: {}", e)),
+                    Err(e) => Err(anyhow::anyhow!("failed to read symlink target: {}", e)),
                 }
             } else if $task.inode.is_reg() {
                 match $vol.read_file_data(&$task.inode, $task.nid) {
                     Ok(data) => match File::create(&$task.output_path) {
                         Ok(mut file) => match file.write_all(&data) {
                             Ok(_) => Ok(()),
-                            Err(e) => Err(anyhow::anyhow!("写入文件失败: {}", e)),
+                            Err(e) => Err(anyhow::anyhow!("failed to write file: {}", e)),
                         },
-                        Err(e) => Err(anyhow::anyhow!("创建文件失败: {}", e)),
+                        Err(e) => Err(anyhow::anyhow!("failed to create file: {}", e)),
                     },
-                    Err(e) => Err(anyhow::anyhow!("读取文件数据失败: {}", e)),
+                    Err(e) => Err(anyhow::anyhow!("failed to read file data: {}", e)),
                 }
             } else {
                 Ok(())
             };
 
             if let Err(e) = result {
-                log::warn!(" 提取 {:?} 失败: {}", $task.path, e);
+                log::warn!(" failed to extract {:?}: {}", $task.path, e);
                 failed_count.fetch_add(1, Ordering::Relaxed);
             }
 
@@ -178,7 +178,7 @@ fn extract<R: Read + Seek + Send + Sync>(
                 if let Some(volume) = thread_volume.as_ref() {
                     process_task!(volume, task);
                 } else {
-                    log::warn!("线程内 F2FS sparse volume 初始化失败，跳过 {:?}", task.path);
+                    log::warn!("F2FS sparse volume init failed, skipping {:?}", task.path);
                     failed_count.fetch_add(1, Ordering::Relaxed);
                     let count = extracted_count.fetch_add(1, Ordering::Relaxed) + 1;
                     display_progress(filename, count, total_task_count);
@@ -192,7 +192,7 @@ fn extract<R: Read + Seek + Send + Sync>(
                 if let Some(volume) = thread_volume.as_ref() {
                     process_task!(volume, task);
                 } else {
-                    log::warn!("线程内 F2FS volume 初始化失败，跳过 {:?}", task.path);
+                    log::warn!("F2FS volume init failed, skipping {:?}", task.path);
                     failed_count.fetch_add(1, Ordering::Relaxed);
                     let count = extracted_count.fetch_add(1, Ordering::Relaxed) + 1;
                     display_progress(filename, count, total_task_count);
@@ -203,7 +203,7 @@ fn extract<R: Read + Seek + Send + Sync>(
 
     display_completion(start_time.elapsed());
 
-    // Generate configuration file
+    // 生成配置文件
     let fs_config_path = config.fs_config_path.unwrap_or_else(|| {
         config_dir
             .join(format!("{}_fs_config", partition_name))
@@ -234,7 +234,10 @@ fn extract<R: Read + Seek + Send + Sync>(
 
     let failed = failed_count.load(Ordering::Relaxed);
     if failed > 0 {
-        return Err(anyhow::anyhow!("F2FS 提取存在 {} 个失败条目", failed));
+        return Err(anyhow::anyhow!(
+            "F2FS extraction had {} failed entries",
+            failed
+        ));
     }
 
     Ok(())
@@ -259,7 +262,7 @@ fn collect_directory_tasks<R: Read + Seek + Send>(
 
     let node = reader
         .read_node(nid)
-        .map_err(|e| anyhow::anyhow!("读取节点失败 {}: {}", nid.0, e))?;
+        .map_err(|e| anyhow::anyhow!("failed to read node {}: {}", nid.0, e))?;
     let inode = Inode::from_bytes(&node)?;
     if !inode.is_dir() {
         return Ok(());
@@ -267,7 +270,7 @@ fn collect_directory_tasks<R: Read + Seek + Send>(
 
     let entries = reader
         .read_dir(&inode, nid)
-        .map_err(|e| anyhow::anyhow!("读取目录失败 nid={}: {}", nid.0, e))?;
+        .map_err(|e| anyhow::anyhow!("failed to read directory nid={}: {}", nid.0, e))?;
 
     for entry in entries {
         if entry.name == "." || entry.name == ".." {
@@ -277,7 +280,7 @@ fn collect_directory_tasks<R: Read + Seek + Send>(
         let safe_name = match sanitize_single_component(&entry.name) {
             Ok(value) => value,
             Err(err) => {
-                log::warn!("跳过非法目录项 {:?}: {}", entry.name, err);
+                log::warn!("skipping invalid dentry {:?}: {}", entry.name, err);
                 continue;
             }
         };
@@ -286,10 +289,10 @@ fn collect_directory_tasks<R: Read + Seek + Send>(
             check_windows_case_conflict(case_map, extract_path, &entry_rel_path)?;
         }
         let entry_path = join_output_path(extract_path, &entry_rel_path)
-            .map_err(|e| anyhow::anyhow!("无效输出路径 {:?}: {}", entry_rel_path, e))?;
+            .map_err(|e| anyhow::anyhow!("invalid output path {:?}: {}", entry_rel_path, e))?;
         let entry_node = reader.read_node(entry.nid).map_err(|e| {
             anyhow::anyhow!(
-                "读取条目节点失败 {} (nid={}): {}",
+                "failed to read entry node {} (nid={}): {}",
                 entry.name,
                 entry.nid.0,
                 e
@@ -351,7 +354,7 @@ fn collect_directory_tasks<R: Read + Seek + Send>(
     Ok(())
 }
 
-// Extract extended attributes (xattrs) from inode
+// 从 inode 提取扩展属性 (xattr)
 fn extract_xattrs<R: Read + Seek + Send>(
     reader: &F2fsVolume<R>,
     inode: &Inode,
@@ -377,7 +380,7 @@ fn extract_xattrs<R: Read + Seek + Send>(
             }
         }
         Err(_) => {
-            // Ignore xattr read failures, some files may not have xattr
+            // 忽略 xattr 读取失败, 部分文件可能没有 xattr
         }
     }
 }

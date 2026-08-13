@@ -1,4 +1,4 @@
-// EXT4 Inode builder
+// EXT4 inode 构建器
 
 use crate::filesystem::ext4::Result;
 use crate::filesystem::ext4::types::*;
@@ -6,7 +6,7 @@ use crate::filesystem::ext4::write::extent::ExtentBuilder;
 use crate::filesystem::ext4::write::xattr::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-// Inode builder
+// inode 构建器
 pub struct InodeBuilder {
     mode: u16,
     uid: u32,
@@ -24,11 +24,11 @@ pub struct InodeBuilder {
 }
 
 impl InodeBuilder {
-    // Create new inode builder
+    // 创建新的 inode 构建器
     pub fn new() -> Self {
+        // 系统时钟早于 epoch 时退化为 0, 不影响 inode 有效性
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            // Fall back to 0 when the clock predates the epoch; the image stays valid
             .unwrap_or_default()
             .as_secs() as u32;
 
@@ -49,7 +49,7 @@ impl InodeBuilder {
         }
     }
 
-    // Create directory inode
+    // 创建目录 inode
     pub fn new_dir(mode: u16, uid: u32, gid: u32) -> Self {
         let mut builder = Self::new();
         builder.mode = inode_mode::S_IFDIR | (mode & 0o7777);
@@ -59,7 +59,7 @@ impl InodeBuilder {
         builder
     }
 
-    // Create file inode
+    // 创建普通文件 inode
     pub fn new_file(mode: u16, uid: u32, gid: u32) -> Self {
         let mut builder = Self::new();
         builder.mode = inode_mode::S_IFREG | (mode & 0o7777);
@@ -68,47 +68,47 @@ impl InodeBuilder {
         builder
     }
 
-    // Create symbolic link inode
+    // 创建符号链接 inode
     pub fn new_symlink(uid: u32, gid: u32) -> Self {
         let mut builder = Self::new();
         builder.mode = inode_mode::S_IFLNK | 0o777;
         builder.uid = uid;
         builder.gid = gid;
-        builder.flags = 0; // Symbolic links don't use extents
+        builder.flags = 0; // 符号链接不使用 extent
         builder
     }
 
-    // Set size
+    // 设置文件大小
     pub fn with_size(mut self, size: u64) -> Self {
         self.size = size;
         self
     }
 
-    // Set the number of blocks
+    // 设置块数
     pub fn with_blocks(mut self, blocks: u32) -> Self {
         self.blocks = blocks;
         self
     }
 
-    // Set the number of links
+    // 设置链接数
     pub fn with_links(mut self, links: u16) -> Self {
         self.links_count = links;
         self
     }
 
-    // Set extent data
+    // 设置 extent 数据
     pub fn with_extents(mut self, extents: &ExtentBuilder) -> Self {
         self.i_block = extents.build_inline();
         self
     }
 
-    // Set extent flag
+    // 设置 extent 标志
     pub fn with_extent_flag(mut self) -> Self {
         self.flags |= inode_mode::EXT4_EXTENTS_FL;
         self
     }
 
-    // Set symbolic link target
+    // 设置符号链接目标
     pub fn with_symlink_target(mut self, target: &str) -> Self {
         let target_bytes = target.as_bytes();
         let copy_len = target_bytes.len().min(60);
@@ -117,18 +117,18 @@ impl InodeBuilder {
         self
     }
 
-    // Add xattr
+    // 添加 xattr
     pub fn add_xattr(&mut self, entry: XattrEntry) {
         self.xattrs.push(entry);
     }
 
-    // Set up SELinux context
+    // 设置 SELinux 安全上下文
     pub fn with_selinux_context(mut self, context: &str) -> Self {
         self.xattrs.push(XattrEntry::selinux(context));
         self
     }
 
-    // Set timestamp
+    // 设置时间戳
     pub fn with_times(mut self, atime: u32, ctime: u32, mtime: u32) -> Self {
         self.atime = atime;
         self.ctime = ctime;
@@ -136,11 +136,11 @@ impl InodeBuilder {
         self
     }
 
-    // Build inode
+    // 构建 inode
     pub fn build(&self, inode_size: u16) -> Result<Vec<u8>> {
         let mut data = vec![0u8; inode_size as usize];
 
-        // Basic fields
+        // 基础字段
         data[0..2].copy_from_slice(&self.mode.to_le_bytes());
         data[2..4].copy_from_slice(&(self.uid as u16).to_le_bytes());
         data[4..8].copy_from_slice(&(self.size as u32).to_le_bytes());
@@ -153,51 +153,51 @@ impl InodeBuilder {
         data[28..32].copy_from_slice(&self.blocks.to_le_bytes());
         data[32..36].copy_from_slice(&self.flags.to_le_bytes());
 
-        // osd1
+        // osd1 操作系统相关字段
         data[36..40].copy_from_slice(&0u32.to_le_bytes());
 
-        // i_block (extent or symbolic link target)
+        // i_block (存放 extent 或符号链接目标)
         data[40..100].copy_from_slice(&self.i_block);
 
-        // i_generation
+        // i_generation 版本号
         data[100..104].copy_from_slice(&0u32.to_le_bytes());
 
-        // i_file_acl_lo
+        // i_file_acl_lo ACL 块低 32 位
         data[104..108].copy_from_slice(&0u32.to_le_bytes());
 
-        // i_size_hi
+        // i_size_hi 文件大小高 32 位
         data[108..112].copy_from_slice(&((self.size >> 32) as u32).to_le_bytes());
 
-        // osd2 (12 bytes)
+        // osd2 (12 字节)
         data[112..116].copy_from_slice(&0u32.to_le_bytes()); // blocks_high
         data[116..118].copy_from_slice(&0u16.to_le_bytes()); // file_acl_hi
         data[118..120].copy_from_slice(&((self.uid >> 16) as u16).to_le_bytes());
         data[120..122].copy_from_slice(&((self.gid >> 16) as u16).to_le_bytes());
         data[122..124].copy_from_slice(&0u16.to_le_bytes()); // checksum_lo
-        data[124..126].copy_from_slice(&0u16.to_le_bytes()); // reserved
+        data[124..126].copy_from_slice(&0u16.to_le_bytes()); // 保留字段
 
-        // Extra fields (if inode_size > 128)
+        // 额外字段 (inode_size 大于 128 时存在)
         if inode_size > 128 {
-            // i_extra_isize
+            // i_extra_isize 额外字段长度
             data[128..130].copy_from_slice(&32u16.to_le_bytes());
-            // i_checksum_hi
+            // i_checksum_hi 校验和高位
             data[130..132].copy_from_slice(&0u16.to_le_bytes());
-            // i_ctime_extra
+            // i_ctime_extra 变更时间高精度位
             data[132..136].copy_from_slice(&0u32.to_le_bytes());
-            // i_mtime_extra
+            // i_mtime_extra 修改时间高精度位
             data[136..140].copy_from_slice(&0u32.to_le_bytes());
-            // i_atime_extra
+            // i_atime_extra 访问时间高精度位
             data[140..144].copy_from_slice(&0u32.to_le_bytes());
-            // i_crtime
+            // i_crtime 创建时间
             data[144..148].copy_from_slice(&self.ctime.to_le_bytes());
-            // i_crtime_extra
+            // i_crtime_extra 创建时间高精度位
             data[148..152].copy_from_slice(&0u32.to_le_bytes());
-            // i_version_hi
+            // i_version_hi 版本号高位
             data[152..156].copy_from_slice(&0u32.to_le_bytes());
-            // i_projid
+            // i_projid 项目 ID
             data[156..160].copy_from_slice(&0u32.to_le_bytes());
 
-            // Inline xattr (if any)
+            // inline xattr (存在时写入)
             if !self.xattrs.is_empty() && inode_size >= 256 {
                 let xattr_start = 160;
                 let xattr_size = (inode_size as usize) - xattr_start;
@@ -233,7 +233,7 @@ mod tests {
 
         assert_eq!(data.len(), 256);
 
-        // Authentication mode
+        // 校验 mode
         let mode = u16::from_le_bytes([data[0], data[1]]);
         assert_eq!(mode & inode_mode::S_IFMT, inode_mode::S_IFDIR);
     }

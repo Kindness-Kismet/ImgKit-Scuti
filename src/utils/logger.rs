@@ -1,4 +1,4 @@
-// Log system module
+// 日志系统模块
 
 use chrono::Local;
 use env_logger::fmt::Formatter;
@@ -8,16 +8,16 @@ use std::sync::Once;
 
 static INIT: Once = Once::new();
 
-// Initialize the log system
-// level: 0 = Silent (only errors are displayed), 1 = Basic information (Info), 2 = Detailed information (Info + Warn), 3 = Debug information (Debug + Trace)
+// 初始化日志系统
+// level: 0 = 静默 (仅显示错误), 1 = 基础信息 (Info), 2 = 详细信息 (Info + Warn), 3 = 调试信息 (Debug + Trace)
 pub fn init(level: u8) {
     INIT.call_once(|| {
         let log_level = match level {
-            0 => log::LevelFilter::Error, // Silent mode, only errors are displayed
-            1 => log::LevelFilter::Info,  // Basic information
-            2 => log::LevelFilter::Info,  // Details (same as 1, but extendable)
-            3 => log::LevelFilter::Debug, // debugging information
-            _ => log::LevelFilter::Trace, // 4 and above show all logs
+            0 => log::LevelFilter::Error, // 静默模式, 仅显示错误
+            1 => log::LevelFilter::Info,  // 基础信息
+            2 => log::LevelFilter::Info,  // 详细信息 (与 1 相同, 但可扩展)
+            3 => log::LevelFilter::Debug, // 调试信息
+            _ => log::LevelFilter::Trace, // 4 及以上显示全部日志
         };
 
         env_logger::Builder::from_default_env()
@@ -27,7 +27,7 @@ pub fn init(level: u8) {
     });
 }
 
-// Custom log format: [INFO] 2025/12/12 22:00:00 xxxxxx
+// 自定义日志格式: [INFO] 2025/12/12 22:00:00 xxxxxx
 fn custom_format(buf: &mut Formatter, record: &Record) -> std::io::Result<()> {
     let timestamp = Local::now().format("%Y/%m/%d %H:%M:%S");
     let level = match record.level() {

@@ -1,16 +1,16 @@
-// Android LP (Logical Partition) metadata analysis
+// Android LP (Logical Partition) 元数据解析
 //
-// Provides metadata structure and parsing functions for Super partitions
+// 提供 super 分区的元数据结构定义与解析能力
 
 use anyhow::{Context, Result, anyhow};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom};
 
-// LP metadata magic number
+// LP metadata 魔数
 const LP_METADATA_GEOMETRY_MAGIC: u32 = 0x616c4467; // "gDla"
 const LP_METADATA_HEADER_MAGIC: u32 = 0x414c5030; // "0PLA"
 
-// LP metadata version
+// LP metadata 版本号
 const LP_METADATA_MAJOR_VERSION: u16 = 10;
 const LP_METADATA_MINOR_VERSION_MAX: u16 = 2;
 const LP_METADATA_GEOMETRY_STRUCT_SIZE: u32 = 52;
@@ -43,7 +43,7 @@ fn compute_table_range(
 ) -> Result<(usize, usize, usize)> {
     if entry_size < min_entry_size {
         return Err(anyhow!(
-            "{} 表条目大小过小: {}, 最小 {}",
+            "{} table entry size too small: {}, minimum {}",
             name,
             entry_size,
             min_entry_size
@@ -52,13 +52,13 @@ fn compute_table_range(
 
     let table_bytes = count
         .checked_mul(entry_size)
-        .ok_or_else(|| anyhow!("{} 表大小溢出", name))?;
+        .ok_or_else(|| anyhow!("{} table size overflow", name))?;
     let end = offset
         .checked_add(table_bytes)
-        .ok_or_else(|| anyhow!("{} 表偏移溢出", name))?;
+        .ok_or_else(|| anyhow!("{} table offset overflow", name))?;
     if end > tables_size {
         return Err(anyhow!(
-            "{} 表越界: offset={}, bytes={}, tables_size={}",
+            "{} table out of bounds: offset={}, bytes={}, tables_size={}",
             name,
             offset,
             table_bytes,
@@ -69,7 +69,7 @@ fn compute_table_range(
     Ok((offset as usize, entry_size as usize, count as usize))
 }
 
-// LP metadata geometry information
+// LP metadata geometry 信息
 #[derive(Debug, Clone)]
 pub struct LpMetadataGeometry {
     pub magic: u32,
@@ -90,12 +90,12 @@ impl LpMetadataGeometry {
         let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
 
         if magic != LP_METADATA_GEOMETRY_MAGIC {
-            anyhow::bail!("无效的 LP 几何魔数: {:#x}", magic);
+            anyhow::bail!("invalid LP geometry magic: {:#x}", magic);
         }
 
         let struct_size = u32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]);
         if struct_size < LP_METADATA_GEOMETRY_STRUCT_SIZE || struct_size as usize > buf.len() {
-            anyhow::bail!("无效的 LP 几何结构大小: {}", struct_size);
+            anyhow::bail!("invalid LP geometry struct size: {}", struct_size);
         }
 
         let mut checksum = [0u8; 32];
@@ -104,20 +104,20 @@ impl LpMetadataGeometry {
         checksum_data[8..40].fill(0);
         let expected_checksum = sha256(&checksum_data[..struct_size as usize]);
         if checksum != expected_checksum {
-            anyhow::bail!("LP 几何信息校验和不匹配");
+            anyhow::bail!("LP geometry checksum mismatch");
         }
 
         let metadata_max_size = u32::from_le_bytes([buf[40], buf[41], buf[42], buf[43]]);
         let metadata_slot_count = u32::from_le_bytes([buf[44], buf[45], buf[46], buf[47]]);
         let logical_block_size = u32::from_le_bytes([buf[48], buf[49], buf[50], buf[51]]);
         if metadata_max_size == 0 {
-            anyhow::bail!("LP metadata_max_size 不能为 0");
+            anyhow::bail!("LP metadata_max_size must not be 0");
         }
         if metadata_slot_count == 0 {
-            anyhow::bail!("LP metadata_slot_count 不能为 0");
+            anyhow::bail!("LP metadata_slot_count must not be 0");
         }
         if logical_block_size == 0 {
-            anyhow::bail!("LP logical_block_size 不能为 0");
+            anyhow::bail!("LP logical_block_size must not be 0");
         }
 
         Ok(Self {
@@ -131,7 +131,7 @@ impl LpMetadataGeometry {
     }
 }
 
-// LP metadata header
+// LP metadata header 结构
 #[derive(Debug, Clone)]
 pub struct LpMetadataHeader {
     pub magic: u32,
@@ -162,7 +162,7 @@ impl LpMetadataHeader {
 
         let magic = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
         if magic != LP_METADATA_HEADER_MAGIC {
-            anyhow::bail!("无效的 LP 元数据头魔数: {:#x}", magic);
+            anyhow::bail!("invalid LP metadata header magic: {:#x}", magic);
         }
 
         let major_version = u16::from_le_bytes([buf[4], buf[5]]);
@@ -172,7 +172,7 @@ impl LpMetadataHeader {
             || minor_version > LP_METADATA_MINOR_VERSION_MAX
         {
             anyhow::bail!(
-                "不支持的 LP 元数据版本: {}.{}",
+                "unsupported LP metadata version: {}.{}",
                 major_version,
                 minor_version
             );
@@ -180,7 +180,7 @@ impl LpMetadataHeader {
 
         let header_size = u32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]);
         if !(LP_METADATA_HEADER_V1_0_SIZE..=LP_METADATA_HEADER_V1_2_SIZE).contains(&header_size) {
-            anyhow::bail!("无效的 LP 元数据头大小: {}", header_size);
+            anyhow::bail!("invalid LP metadata header size: {}", header_size);
         }
         let mut header_checksum = [0u8; 32];
         header_checksum.copy_from_slice(&buf[12..44]);
@@ -193,7 +193,7 @@ impl LpMetadataHeader {
         checksum_data[12..44].fill(0);
         let expected_checksum = sha256(&checksum_data[..header_size as usize]);
         if header_checksum != expected_checksum {
-            anyhow::bail!("LP 元数据头校验和不匹配");
+            anyhow::bail!("LP metadata header checksum mismatch");
         }
 
         Ok(Self {
@@ -220,7 +220,7 @@ impl LpMetadataHeader {
     }
 }
 
-// LP partition information
+// LP 分区信息
 #[derive(Debug, Clone)]
 pub struct LpMetadataPartition {
     pub name: String,
@@ -231,13 +231,16 @@ pub struct LpMetadataPartition {
 }
 
 impl LpMetadataPartition {
-    /// Read partition information from byte array
+    // 从字节数组解析分区信息
     pub fn from_bytes(buf: &[u8]) -> Result<Self> {
         if buf.len() < 52 {
-            anyhow::bail!("分区条目大小不足，需要至少52字节，实际{}字节", buf.len());
+            anyhow::bail!(
+                "partition entry too small: need 52 bytes, got {} bytes",
+                buf.len()
+            );
         }
 
-        // Read partition name (36 bytes, null terminated)
+        // 读取分区名 (36 字节, 以 null 结尾)
         let name_bytes = &buf[0..36];
         let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(36);
         let name = String::from_utf8_lossy(&name_bytes[..name_end]).to_string();
@@ -252,7 +255,7 @@ impl LpMetadataPartition {
     }
 }
 
-// LP extent information
+// LP extent 信息
 #[derive(Debug, Clone)]
 pub struct LpMetadataExtent {
     pub num_sectors: u64,
@@ -262,10 +265,13 @@ pub struct LpMetadataExtent {
 }
 
 impl LpMetadataExtent {
-    /// Read extent information from byte array
+    // 从字节数组解析 extent 信息
     pub fn from_bytes(buf: &[u8]) -> Result<Self> {
         if buf.len() < 24 {
-            anyhow::bail!("扩展区条目大小不足，需要至少24字节，实际{}字节", buf.len());
+            anyhow::bail!(
+                "extent entry too small: need 24 bytes, got {} bytes",
+                buf.len()
+            );
         }
 
         Ok(Self {
@@ -281,7 +287,7 @@ impl LpMetadataExtent {
     }
 }
 
-// LP complete metadata
+// 完整的 LP metadata
 #[derive(Debug)]
 pub struct LpMetadata {
     pub geometry: LpMetadataGeometry,
@@ -291,9 +297,9 @@ pub struct LpMetadata {
 }
 
 impl LpMetadata {
-    /// Parse complete LP metadata from Reader
+    // 从 Reader 解析完整的 LP metadata
     pub fn from_reader<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        // Try multiple possible LP geometry locations
+        // 依次尝试若干可能的 LP geometry 位置
         let possible_offsets = [0u64, 16, 512, 4096];
 
         let mut geometry = None;
@@ -310,9 +316,9 @@ impl LpMetadata {
             }
         }
 
-        let geometry = geometry.context("在所有可能的偏移位置都未找到有效的 LP 几何信息")?;
+        let geometry = geometry.context("no valid LP geometry found at any candidate offset")?;
 
-        // Try reading the metadata header, probably at geometry information +4096 or +8192
+        // 尝试读取 metadata header, 可能位于 geometry 之后的 +4096 或 +8192 处
         let possible_metadata_offsets = [geometry_offset + 4096, geometry_offset + 8192];
 
         let mut header = None;
@@ -330,17 +336,17 @@ impl LpMetadata {
             }
         }
 
-        let header = header.context("在所有可能的偏移位置都未找到有效的 LP 元数据头")?;
+        let header = header.context("no valid LP metadata header found at any candidate offset")?;
         if header.header_size > geometry.metadata_max_size {
             anyhow::bail!(
-                "LP header_size 超过 metadata_max_size: {} > {}",
+                "LP header_size exceeds metadata_max_size: {} > {}",
                 header.header_size,
                 geometry.metadata_max_size
             );
         }
         if header.tables_size > geometry.metadata_max_size {
             anyhow::bail!(
-                "LP tables_size 超过 metadata_max_size: {} > {}",
+                "LP tables_size exceeds metadata_max_size: {} > {}",
                 header.tables_size,
                 geometry.metadata_max_size
             );
@@ -348,14 +354,14 @@ impl LpMetadata {
 
         let tables_start = primary_metadata_offset
             .checked_add(header.header_size as u64)
-            .ok_or_else(|| anyhow!("LP tables_start 溢出"))?;
+            .ok_or_else(|| anyhow!("LP tables_start overflow"))?;
         reader.seek(SeekFrom::Start(tables_start))?;
         let mut tables_data = vec![0u8; header.tables_size as usize];
         reader.read_exact(&mut tables_data)?;
 
         let expected_tables_checksum = sha256(&tables_data);
         if header.tables_checksum != expected_tables_checksum {
-            anyhow::bail!("LP 表校验和不匹配");
+            anyhow::bail!("LP tables checksum mismatch");
         }
 
         let (partitions_offset, partitions_entry_size, partitions_count) = compute_table_range(
@@ -407,7 +413,7 @@ impl LpMetadata {
                 LP_TARGET_TYPE_LINEAR => {
                     if extent.target_source >= header.block_devices_count {
                         anyhow::bail!(
-                            "扩展区目标块设备索引越界: {} >= {}",
+                            "extent target block device index out of bounds: {} >= {}",
                             extent.target_source,
                             header.block_devices_count
                         );
@@ -415,10 +421,10 @@ impl LpMetadata {
                 }
                 LP_TARGET_TYPE_ZERO => {
                     if extent.target_data != 0 || extent.target_source != 0 {
-                        anyhow::bail!("ZERO 扩展区必须使用 target_data=0 且 target_source=0");
+                        anyhow::bail!("ZERO extent must use target_data=0 and target_source=0");
                     }
                 }
-                _ => anyhow::bail!("不支持的扩展区类型: {}", extent.target_type),
+                _ => anyhow::bail!("unsupported extent target type: {}", extent.target_type),
             }
             extents.push(extent);
         }
@@ -427,10 +433,10 @@ impl LpMetadata {
             let extents_end = partition
                 .first_extent_index
                 .checked_add(partition.num_extents)
-                .ok_or_else(|| anyhow!("分区 {} 扩展区范围溢出", partition.name))?;
+                .ok_or_else(|| anyhow!("partition {} extent range overflow", partition.name))?;
             if extents_end > header.extents_count {
                 anyhow::bail!(
-                    "分区 {} 扩展区越界: first={}, count={}, total={}",
+                    "partition {} extents out of bounds: first={}, count={}, total={}",
                     partition.name,
                     partition.first_extent_index,
                     partition.num_extents,
@@ -447,14 +453,14 @@ impl LpMetadata {
         })
     }
 
-    /// Get the partition with the specified name
+    // 获取指定名称的分区
     pub fn get_partition(&self, name: &str) -> Option<&LpMetadataPartition> {
         self.partitions.iter().find(|p| p.name == name)
     }
 
-    /// Get all extents of a partition
+    // 获取分区的全部 extent
     pub fn get_partition_extents(&self, partition: &LpMetadataPartition) -> Vec<&LpMetadataExtent> {
-        // If the partition does not have an extent, an empty Vec is returned directly.
+        // 分区没有 extent 时直接返回空列表
         if partition.num_extents == 0 {
             return Vec::new();
         }
@@ -462,10 +468,10 @@ impl LpMetadata {
         let start = partition.first_extent_index as usize;
         let end = start + partition.num_extents as usize;
 
-        // Boundary checking
+        // 边界检查
         if start >= self.extents.len() || end > self.extents.len() {
             log::warn!(
-                "分区 {} 的扩展区索引越界: start={}, end={}, total_extents={}",
+                "partition {} extent index out of bounds: start={}, end={}, total_extents={}",
                 partition.name,
                 start,
                 end,

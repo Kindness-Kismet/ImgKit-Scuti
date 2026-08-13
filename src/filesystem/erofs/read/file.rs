@@ -1,19 +1,19 @@
-// EROFS Inode file reading module
+// EROFS inode 文件读取模块
 
 use super::volume::ErofsVolume;
 use crate::filesystem::erofs::*;
 use std::io::{Read, Seek, SeekFrom};
 
 impl ErofsVolume {
-    // Read file data
+    // 读取文件数据
     pub fn read_file_data(&mut self, inode_info: &InodeInfo) -> Result<Vec<u8>> {
-        // Prevent memory allocation overflow: limit maximum file size to 16GB
+        // 防止内存分配溢出: 限制文件最大为 16GB
         const MAX_FILE_SIZE: u64 = 16 * 1024 * 1024 * 1024;
         if inode_info.size > MAX_FILE_SIZE {
             return Err(ErofsError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!(
-                    "文件大小 {} 超过最大允许大小 {}",
+                    "file size {} exceeds maximum allowed size {}",
                     inode_info.size, MAX_FILE_SIZE
                 ),
             )));
@@ -34,16 +34,16 @@ impl ErofsVolume {
             EROFS_INODE_FLAT_PLAIN => self.read_flat_plain(inode_info),
             EROFS_INODE_FLAT_COMPRESSION_LEGACY => self.read_compressed_file(inode_info),
             _ => Err(ErofsError::UnsupportedFeature(format!(
-                "数据布局 {}",
+                "data layout {}",
                 data_layout
             ))),
         }
     }
 
-    // Read files with FLAT_INLINE layout
+    // 读取 FLAT_INLINE 布局的文件
     fn read_flat_inline(&mut self, inode_info: &InodeInfo) -> Result<Vec<u8>> {
         if inode_info.raw_blkaddr != 0xFFFFFFFF {
-            // Large files: use mixed storage mode (tail packing)
+            // 大文件: 采用混合存储模式 (tail packing)
             let block_addr = inode_info.raw_blkaddr as u64;
             let data_offset = block_addr.saturating_mul(self.block_size as u64);
             let block_size = self.block_size as usize;
@@ -63,7 +63,7 @@ impl ErofsVolume {
                 tailpacking
             );
 
-            // Read external block
+            // 读取外部块
             let mut data = if external_size > 0 {
                 self.file.seek(SeekFrom::Start(data_offset))?;
                 let mut external_data = vec![0u8; external_size];
@@ -73,7 +73,7 @@ impl ErofsVolume {
                 Vec::new()
             };
 
-            // If there is a tail, read from the inline position
+            // 若存在尾部数据, 从 inline 位置读取
             if tailpacking {
                 let tail_size = inode_info.size as usize - external_size;
                 let inode_offset = self.nid_to_offset(inode_info.nid);
@@ -82,7 +82,7 @@ impl ErofsVolume {
                 let inline_offset = inode_offset + inode_size + xattr_size as u64;
 
                 log::debug!(
-                    "  读取文件 inline 尾部: offset={}, size={}",
+                    "  reading file inline tail: offset={}, size={}",
                     inline_offset,
                     tail_size
                 );
@@ -96,7 +96,7 @@ impl ErofsVolume {
 
             Ok(data)
         } else {
-            // Small files: data inline behind inode
+            // 小文件: 数据 inline 存放在 inode 之后
             let inode_offset = self.nid_to_offset(inode_info.nid);
             let inode_size = if inode_info.is_compact { 32 } else { 64 };
             let xattr_size = self.xattr_ibody_size(inode_info.xattr_icount);
@@ -116,12 +116,12 @@ impl ErofsVolume {
             let n = self.file.read(&mut data)?;
             data.truncate(n);
 
-            log::debug!("读取了 {} 字节（i_size={}）", n, inode_info.size);
+            log::debug!("read {} bytes (i_size={})", n, inode_info.size);
             Ok(data)
         }
     }
 
-    // Read files with FLAT_PLAIN layout
+    // 读取 FLAT_PLAIN 布局的文件
     fn read_flat_plain(&mut self, inode_info: &InodeInfo) -> Result<Vec<u8>> {
         let block_addr = inode_info.raw_blkaddr as u64;
         let data_offset = block_addr.saturating_mul(self.block_size as u64);
@@ -138,7 +138,7 @@ impl ErofsVolume {
         Ok(data)
     }
 
-    // Read symbolic links
+    // 读取符号链接
     pub fn read_symlink(&mut self, inode_info: &InodeInfo) -> Result<String> {
         let data = self.read_file_data(inode_info)?;
         Ok(String::from_utf8_lossy(&data).to_string())

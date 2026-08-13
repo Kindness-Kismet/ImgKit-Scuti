@@ -11,10 +11,16 @@ pub fn normalize_image_path(path: &Path) -> Result<PathBuf> {
             Component::Normal(name) => normalized.push(name),
             Component::RootDir | Component::CurDir => {}
             Component::ParentDir => {
-                return Err(anyhow!("路径包含父目录跳转: {:?}", path));
+                return Err(anyhow!(
+                    "path contains parent directory traversal: {:?}",
+                    path
+                ));
             }
             Component::Prefix(_) => {
-                return Err(anyhow!("路径包含不允许的盘符前缀: {:?}", path));
+                return Err(anyhow!(
+                    "path contains a disallowed drive prefix: {:?}",
+                    path
+                ));
             }
         }
     }
@@ -28,14 +34,14 @@ pub fn sanitize_single_component(name: &str) -> Result<String> {
 
     let first = components
         .next()
-        .ok_or_else(|| anyhow!("路径组件为空: {}", name))?;
+        .ok_or_else(|| anyhow!("empty path component: {}", name))?;
     if components.next().is_some() {
-        return Err(anyhow!("路径组件包含分隔符: {}", name));
+        return Err(anyhow!("path component contains a separator: {}", name));
     }
 
     match first {
         Component::Normal(value) => Ok(value.to_string_lossy().to_string()),
-        _ => Err(anyhow!("无效的路径组件: {}", name)),
+        _ => Err(anyhow!("invalid path component: {}", name)),
     }
 }
 
@@ -62,7 +68,7 @@ pub fn is_case_sensitive_directory(path: &Path) -> Result<bool> {
             .write(true)
             .create_new(true)
             .open(&lower)
-            .map_err(|e| anyhow!("创建大小写检测文件失败: {}", e))?;
+            .map_err(|e| anyhow!("failed to create case-sensitivity probe file: {}", e))?;
 
         let upper_result = OpenOptions::new().write(true).create_new(true).open(&upper);
         let _ = fs::remove_dir_all(&check_dir);
@@ -70,7 +76,7 @@ pub fn is_case_sensitive_directory(path: &Path) -> Result<bool> {
         match upper_result {
             Ok(_) => Ok(true),
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-            Err(err) => Err(anyhow!("大小写检测失败: {}", err)),
+            Err(err) => Err(anyhow!("case-sensitivity detection failed: {}", err)),
         }
     }
 
@@ -89,16 +95,16 @@ pub fn build_windows_case_conflict_message(
     #[cfg(windows)]
     {
         format!(
-            "检测到仅大小写不同的冲突路径:\n\
+            "detected paths that conflict by case only:\n\
   {}\n\
   {}\n\
-当前输出目录未开启大小写敏感: {}\n\
-此提示仅适用于 Windows。\n\
-请在该目录执行以下命令开启:\n\
+case sensitivity is not enabled for the current output directory: {}\n\
+this notice applies to Windows only\n\
+run the following command in that directory to enable it:\n\
   fsutil file setCaseSensitiveInfo . enable\n\
-可用以下命令验证状态:\n\
+verify the current state with:\n\
   fsutil file queryCaseSensitiveInfo .\n\
-如提示权限不足, 请使用管理员身份打开 PowerShell 后重试。",
+if permission is denied, reopen PowerShell as administrator and retry",
             existing_path.display(),
             incoming_path.display(),
             output_dir.display()

@@ -1,6 +1,6 @@
-// Android Sparse Image Reader
+// Android sparse image 读取器
 //
-// Provides virtual reading of sparse image formats without converting to a full image
+// 以虚拟方式读取 sparse image, 无需先转换为完整镜像
 
 use crate::container::sparse::format::*;
 use anyhow::{Context, Result, anyhow};
@@ -8,7 +8,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-// Chunk metadata
+// chunk 元数据
 #[derive(Debug, Clone)]
 struct ChunkMeta {
     chunk_type: u16,
@@ -18,7 +18,7 @@ struct ChunkMeta {
     fill_value: u32,
 }
 
-// Sparse Image Virtual Reader
+// sparse image 虚拟读取器
 pub struct SparseReader {
     file: File,
     #[allow(dead_code)]
@@ -29,18 +29,18 @@ pub struct SparseReader {
 }
 
 impl SparseReader {
-    // Open sparse image file
+    // 打开 sparse image 文件
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let mut file = File::open(path.as_ref())
-            .with_context(|| format!("无法打开文件: {:?}", path.as_ref()))?;
+            .with_context(|| format!("failed to open file: {:?}", path.as_ref()))?;
 
         let mut buf = [0u8; SPARSE_HEADER_SIZE];
         file.read_exact(&mut buf)?;
 
         let header =
-            SparseHeader::from_bytes(&buf).ok_or_else(|| anyhow::anyhow!("非稀疏镜像格式"))?;
+            SparseHeader::from_bytes(&buf).ok_or_else(|| anyhow::anyhow!("not a sparse image"))?;
 
-        // Parse all chunks
+        // 解析全部 chunk
         let mut chunks = Vec::new();
         let mut output_offset = 0u64;
 
@@ -48,19 +48,19 @@ impl SparseReader {
             let mut chunk_buf = [0u8; 12];
             file.read_exact(&mut chunk_buf)?;
             let chunk_header = ChunkHeader::from_bytes(&chunk_buf)
-                .ok_or_else(|| anyhow::anyhow!("无效的 chunk 头"))?;
+                .ok_or_else(|| anyhow::anyhow!("invalid chunk header"))?;
 
             let file_offset = file.stream_position()?;
             let output_size = (chunk_header.chunk_sz as u64)
                 .checked_mul(header.blk_sz as u64)
-                .ok_or_else(|| anyhow!("chunk 输出大小溢出"))?;
+                .ok_or_else(|| anyhow!("chunk output size overflow"))?;
             let data_sz = chunk_data_size(chunk_header.total_sz)?;
 
             let meta = match chunk_header.chunk_type {
                 CHUNK_TYPE_RAW => {
                     if data_sz < output_size {
                         return Err(anyhow!(
-                            "RAW chunk 数据长度过小: data_sz={}, output_size={}",
+                            "RAW chunk data too small: data_sz={}, output_size={}",
                             data_sz,
                             output_size
                         ));
@@ -75,15 +75,15 @@ impl SparseReader {
                     }
                 }
                 CHUNK_TYPE_FILL => {
-                    // Fill data, read 4-byte filling value
+                    // fill chunk 数据, 读取 4 字节填充值
                     if data_sz < 4 {
-                        return Err(anyhow!("FILL chunk 数据长度不足 4 字节"));
+                        return Err(anyhow!("FILL chunk data shorter than 4 bytes"));
                     }
                     let mut fill_buf = [0u8; 4];
                     file.read_exact(&mut fill_buf)?;
                     let fill_value = u32::from_le_bytes(fill_buf);
 
-                    // Skip possible remaining data
+                    // 跳过可能存在的剩余数据
                     if data_sz > 4 {
                         seek_forward(&mut file, data_sz - 4)?;
                     }
@@ -109,7 +109,7 @@ impl SparseReader {
                     }
                 }
                 _ => {
-                    // Skip chunks of unknown type
+                    // 跳过未知类型的 chunk
                     seek_forward(&mut file, data_sz)?;
                     ChunkMeta {
                         chunk_type: chunk_header.chunk_type,
@@ -124,12 +124,12 @@ impl SparseReader {
             chunks.push(meta);
             output_offset = output_offset
                 .checked_add(output_size)
-                .ok_or_else(|| anyhow!("sparse 输出偏移溢出"))?;
+                .ok_or_else(|| anyhow!("sparse output offset overflow"))?;
         }
 
         let total_size = (header.total_blks as u64)
             .checked_mul(header.blk_sz as u64)
-            .ok_or_else(|| anyhow!("sparse 总大小溢出"))?;
+            .ok_or_else(|| anyhow!("sparse total size overflow"))?;
 
         Ok(Self {
             file,
@@ -140,12 +140,12 @@ impl SparseReader {
         })
     }
 
-    // Get the total size of the image
+    // 获取镜像的总大小
     pub fn total_size(&self) -> u64 {
         self.total_size
     }
 
-    // Find the chunk at the specified location (binary search)
+    // 查找指定位置所属的 chunk (二分查找)
     fn find_chunk(&self, pos: u64) -> Option<usize> {
         if self.chunks.is_empty() {
             return None;
@@ -169,11 +169,11 @@ fn chunk_data_size(total_sz: u32) -> Result<u64> {
     total_sz
         .checked_sub(CHUNK_HEADER_SIZE)
         .map(u64::from)
-        .ok_or_else(|| anyhow!("chunk total_sz 小于头部大小"))
+        .ok_or_else(|| anyhow!("chunk total_sz smaller than header size"))
 }
 
 fn seek_forward(file: &mut File, amount: u64) -> Result<()> {
-    let offset = i64::try_from(amount).map_err(|_| anyhow!("偏移量过大: {}", amount))?;
+    let offset = i64::try_from(amount).map_err(|_| anyhow!("offset too large: {}", amount))?;
     file.seek(SeekFrom::Current(offset))?;
     Ok(())
 }
@@ -237,7 +237,7 @@ impl Seek for SparseReader {
         if new_pos < 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "无效的 seek 位置",
+                "invalid seek position",
             ));
         }
 
@@ -246,7 +246,7 @@ impl Seek for SparseReader {
     }
 }
 
-// Check if a file is in sparse format
+// 检测文件是否为 sparse image 格式
 pub fn is_sparse_image<P: AsRef<Path>>(path: P) -> Result<bool> {
     let mut file = File::open(path.as_ref())?;
     let mut buf = [0u8; 4];

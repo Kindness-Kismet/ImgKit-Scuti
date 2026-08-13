@@ -1,11 +1,11 @@
-// EROFS pack command implementation
+// EROFS 打包命令实现
 
 use anyhow::{Result, anyhow};
 use std::path::PathBuf;
 
 use crate::filesystem::erofs::{ErofsConfig, build_erofs_image};
 
-// Parse a UUID string into a 16-byte array
+// 将 UUID 字符串解析为 16 字节数组
 fn parse_uuid(uuid_str: &str) -> Result<[u8; 16]> {
     let hex_str: String = uuid_str.chars().filter(|c| c.is_ascii_hexdigit()).collect();
     if hex_str.len() != 32 {
@@ -46,14 +46,14 @@ pub fn run_erofs_pack(
         return Err(anyhow!("source path is not a directory: {}", source));
     }
 
-    // Validate block size: must be a power of two between 512 and 65536
+    // 校验块大小: 必须是 512 到 65536 之间的 2 的幂
     if !block_size.is_power_of_two() || !(512..=65536).contains(&block_size) {
         return Err(anyhow!(
             "block size must be a power of two between 512 and 65536"
         ));
     }
 
-    // Parse UUID if provided
+    // 若提供了 UUID 则解析
     let uuid_bytes = if let Some(ref uuid_str) = uuid {
         Some(parse_uuid(uuid_str)?)
     } else {

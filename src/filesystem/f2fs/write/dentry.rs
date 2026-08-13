@@ -1,21 +1,21 @@
-// F2FS Directory Block Builder
+// F2FS 目录块构建器
 use crate::filesystem::f2fs::consts::*;
 //
-// Responsible for building F2FS directory data blocks.
+// 负责构建 F2FS 目录数据块.
 
 use crate::filesystem::f2fs::Result;
 use crate::filesystem::f2fs::types::*;
 
-// Number of entries in directory block
+// 目录块中的条目数量
 const NR_DENTRY_IN_BLOCK_CONST: usize = 214;
 
-// Directory bitmap size
+// dentry bitmap 大小
 const DENTRY_BITMAP_SIZE: usize = 27;
 
-// reserved area size
+// 保留区域大小
 const DENTRY_RESERVED_SIZE: usize = 3;
 
-// directory entry
+// 目录项
 #[derive(Debug, Clone)]
 pub struct DentryInfo {
     pub name: Vec<u8>,
@@ -32,17 +32,17 @@ impl DentryInfo {
         }
     }
 
-    // Calculate the number of slots required
+    // 计算所需的 slot 数量
     pub fn slots_needed(&self) -> usize {
         self.name.len().div_ceil(F2FS_SLOT_LEN)
     }
 }
 
-// Directory block builder
+// 目录块构建器
 #[derive(Debug)]
 pub struct DentryBlockBuilder {
     entries: Vec<DentryInfo>,
-    // Number of slots currently in use
+    // 当前已使用的 slot 数量
     used_slots: usize,
 }
 
@@ -54,13 +54,13 @@ impl DentryBlockBuilder {
         }
     }
 
-    // Check if entry can be added
+    // 检查是否还能添加条目
     pub fn can_add(&self, entry: &DentryInfo) -> bool {
         let slots = entry.slots_needed();
         self.used_slots + slots <= NR_DENTRY_IN_BLOCK_CONST
     }
 
-    // Add directory entry
+    // 添加目录项
     pub fn add_entry(&mut self, entry: DentryInfo) -> bool {
         if !self.can_add(&entry) {
             return false;
@@ -72,25 +72,25 @@ impl DentryBlockBuilder {
         true
     }
 
-    // Get the number of slots used
+    // 获取已使用的 slot 数量
     pub fn used_slots(&self) -> usize {
         self.used_slots
     }
 
-    // Check if it is empty
+    // 检查是否为空
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    // Build directory block
+    // 构建目录块
     pub fn build(&self) -> Result<[u8; F2FS_BLKSIZE]> {
         let mut buf = [0u8; F2FS_BLKSIZE];
 
-        // Directory block layout:
-        // [0..27]: dentry bitmap (27 bytes)
-        // [27..30]: reserved (3 bytes)
-        // [30..30+214*11]: dentry array (214 * 11 = 2354 bytes)
-        // [2384..4096]: filename area (1712 bytes)
+        // 目录块布局:
+        // [0..27]: dentry bitmap (27 字节)
+        // [27..30]: 保留 (3 字节)
+        // [30..30+214*11]: dentry 数组 (214 * 11 = 2354 字节)
+        // [2384..4096]: 文件名区域 (1712 字节)
 
         let bitmap_offset = 0;
         let dentry_offset = DENTRY_BITMAP_SIZE + DENTRY_RESERVED_SIZE;
@@ -103,7 +103,7 @@ impl DentryBlockBuilder {
             let slots = entry.slots_needed();
             let hash = dentry_hash(&entry.name);
 
-            // Set bitmap
+            // 设置 bitmap
             for i in 0..slots {
                 let bit_idx = slot_idx + i;
                 let byte_idx = bit_idx / 8;
@@ -111,7 +111,7 @@ impl DentryBlockBuilder {
                 buf[bitmap_offset + byte_idx] |= 1 << bit_pos;
             }
 
-            // Write directory entry
+            // 写入目录项
             let dentry = DirEntryRaw {
                 hash_code: hash,
                 ino: entry.ino,
@@ -122,7 +122,7 @@ impl DentryBlockBuilder {
             let entry_offset = dentry_offset + slot_idx * F2FS_DIR_ENTRY_SIZE;
             buf[entry_offset..entry_offset + F2FS_DIR_ENTRY_SIZE].copy_from_slice(&dentry_bytes);
 
-            // Write file name
+            // 写入文件名
             let name_start = filename_offset + name_offset;
             let name_end = name_start + entry.name.len();
             if name_end <= F2FS_BLKSIZE {
@@ -143,14 +143,14 @@ impl Default for DentryBlockBuilder {
     }
 }
 
-// F2FS hash collision bit mask (64-bit, consistent with Linux kernel)
-// In a 32-bit hash, the lower 32 bits of this mask are 0xFFFFFFFF, so no bits are actually cleared
+// F2FS 哈希冲突位掩码 (64 位, 与 Linux 内核一致)
+// 在 32 位哈希中, 该掩码的低 32 位为 0xFFFFFFFF, 因此实际上不会清除任何位
 const F2FS_HASH_COL_BIT: u64 = 1 << 63;
 
-// TEA algorithm constants
+// TEA 算法常量
 const DELTA: u32 = 0x9E3779B9;
 
-// TEA transformation function
+// TEA 变换函数
 fn tea_transform(buf: &mut [u32; 4], input: &[u32; 4]) {
     let mut sum: u32 = 0;
     let mut b0 = buf[0];
@@ -171,7 +171,7 @@ fn tea_transform(buf: &mut [u32; 4], input: &[u32; 4]) {
     buf[1] = buf[1].wrapping_add(b1);
 }
 
-// Convert string to hash buffer
+// 将字符串转换为哈希缓冲区
 fn str2hashbuf(msg: &[u8], len: usize, buf: &mut [u32; 4]) {
     let pad = (len as u32) | ((len as u32) << 8);
     let pad = pad | (pad << 16);
@@ -190,30 +190,30 @@ fn str2hashbuf(msg: &[u8], len: usize, buf: &mut [u32; 4]) {
         }
     }
 
-    // Process remaining bytes
+    // 处理剩余字节
     let filled = actual_len.div_ceil(4);
     if !actual_len.is_multiple_of(4) {
         buf[actual_len / 4] = val;
     }
 
-    // fill remaining positions
+    // 填充剩余位置
     for item in buf.iter_mut().skip(filled) {
         *item = pad;
     }
 }
 
-// Calculate directory entry hash (TEA hash)
+// 计算目录项哈希 (TEA hash)
 fn dentry_hash(name: &[u8]) -> u32 {
     if name.is_empty() {
         return 0;
     }
 
-    // The hash of "." and ".." is fixed to 0
+    // "." 与 ".." 的哈希固定为 0
     if name == b"." || name == b".." {
         return 0;
     }
 
-    // Initialize hash buffer (same initial values ​​as ext3/f2fs)
+    // 初始化哈希缓冲区 (初始值与 ext3/f2fs 一致)
     let mut buf: [u32; 4] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
 
     let mut p = name;
@@ -231,20 +231,20 @@ fn dentry_hash(name: &[u8]) -> u32 {
         len -= 16;
     }
 
-    // Use 64-bit mask, then truncate to 32-bit
-    // Since F2FS_HASH_COL_BIT is 1<<63, the mask of the lower 32 bits is 0xFFFFFFFF
-    // So this is actually equivalent to returning buf[0] directly
+    // 先使用 64 位掩码, 再截断为 32 位
+    // 由于 F2FS_HASH_COL_BIT 为 1<<63, 低 32 位的掩码为 0xFFFFFFFF
+    // 因此实际等价于直接返回 buf[0]
     ((buf[0] as u64) & !F2FS_HASH_COL_BIT) as u32
 }
 
-// Inline directory builder (for small directories)
+// inline 目录构建器 (用于小目录)
 #[derive(Debug)]
 pub struct InlineDentryBuilder {
     entries: Vec<DentryInfo>,
     used_slots: usize,
 }
 
-// Maximum number of entries for an inline directory
+// inline 目录的最大条目数量
 const NR_INLINE_DENTRY_CONST: usize = 61;
 
 impl InlineDentryBuilder {
@@ -275,13 +275,13 @@ impl InlineDentryBuilder {
         self.entries.is_empty()
     }
 
-    // Build inline catalog data
+    // 构建 inline 目录数据
     pub fn build(&self) -> Vec<u8> {
-        // Inline directory layout:
-        // [0..8]: bitmap (8 bytes)
-        // [8..9]: reserved (1 byte)
-        // [9..9+61*11]: dentry array (61 * 11 = 671 bytes)
-        // [680..]: filename area
+        // inline 目录布局:
+        // [0..8]: bitmap (8 字节)
+        // [8..9]: 保留 (1 字节)
+        // [9..9+61*11]: dentry 数组 (61 * 11 = 671 字节)
+        // [680..]: 文件名区域
 
         let total_size = 8
             + 1
@@ -300,7 +300,7 @@ impl InlineDentryBuilder {
             let slots = entry.slots_needed();
             let hash = dentry_hash(&entry.name);
 
-            // Set bitmap
+            // 设置 bitmap
             for i in 0..slots {
                 let bit_idx = slot_idx + i;
                 let byte_idx = bit_idx / 8;
@@ -310,7 +310,7 @@ impl InlineDentryBuilder {
                 }
             }
 
-            // Write directory entry
+            // 写入目录项
             let dentry = DirEntryRaw {
                 hash_code: hash,
                 ino: entry.ino,
@@ -324,7 +324,7 @@ impl InlineDentryBuilder {
                     .copy_from_slice(&dentry_bytes);
             }
 
-            // Write file name
+            // 写入文件名
             let name_start = filename_offset + name_offset;
             let name_end = name_start + entry.name.len();
             if name_end <= buf.len() {
@@ -352,10 +352,10 @@ mod tests {
     #[test]
     fn test_dentry_info() {
         let entry = DentryInfo::new(b"test.txt", 100, FileType::RegFile);
-        assert_eq!(entry.slots_needed(), 1); // 8 bytes, 1 slot
+        assert_eq!(entry.slots_needed(), 1); // 8 字节, 1 个 slot
 
         let long_entry = DentryInfo::new(b"very_long_filename.txt", 101, FileType::RegFile);
-        assert_eq!(long_entry.slots_needed(), 3); // 22 bytes, 3 slots
+        assert_eq!(long_entry.slots_needed(), 3); // 22 字节, 3 个 slot
     }
 
     #[test]
@@ -373,7 +373,7 @@ mod tests {
         let data = builder.build().unwrap();
         assert_eq!(data.len(), F2FS_BLKSIZE);
 
-        // Verify bitmap is not empty
+        // 校验 bitmap 非空
         assert_ne!(data[0], 0);
     }
 

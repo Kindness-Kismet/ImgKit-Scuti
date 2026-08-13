@@ -1,4 +1,4 @@
-// CLI argument definitions.
+// 命令行参数定义。
 
 use crate::cli::help::FULL_HELP;
 use clap::{Parser, Subcommand};
@@ -64,7 +64,7 @@ pub enum Commands {
         #[arg(short, long, help = "Path to the output image file")]
         output: String,
 
-        // Filesystem packing arguments (f2fs, ext4)
+        // 文件系统打包参数 (f2fs, ext4)
         #[arg(short, long, help = "Source directory path (required for f2fs/ext4)")]
         source: Option<String>,
 
@@ -101,7 +101,7 @@ pub enum Commands {
         #[arg(long, default_value = "0", help = "Root user GID")]
         root_gid: u32,
 
-        // F2FS-specific arguments
+        // F2FS 专用参数
         #[arg(long, help = "Enable read-only mode (f2fs)")]
         readonly: bool,
 
@@ -114,7 +114,7 @@ pub enum Commands {
         #[arg(long, help = "Enable compression (f2fs)")]
         compression: bool,
 
-        // EROFS-specific arguments
+        // EROFS 专用参数
         #[arg(
             long,
             help = "Compression algorithm (erofs): lz4, lz4hc, lzma, deflate, zstd"
@@ -133,7 +133,7 @@ pub enum Commands {
         )]
         uuid: Option<String>,
 
-        // Super partition arguments
+        // super 分区参数
         #[arg(short, long, help = "Device size in bytes, or 'auto' (super)")]
         device_size: Option<String>,
 
@@ -222,7 +222,7 @@ pub enum Commands {
         )]
         force_full_image: bool,
 
-        // Common arguments
+        // 通用参数
         #[arg(short = 'S', long, help = "Output in sparse image format")]
         sparse: bool,
 

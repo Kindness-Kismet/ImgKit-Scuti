@@ -1,5 +1,4 @@
-// CLI subcommand module.
-// Provides implementations for each subcommand.
+// 命令行子命令模块, 提供各子命令的实现。
 
 mod args;
 mod dispatch;
@@ -20,7 +19,7 @@ pub use super_pack::run_super_pack;
 
 use anyhow::Result;
 
-// Parse a size string (plain byte count)
+// 解析大小字符串, 只接受纯字节数
 pub fn parse_size(size_str: &str) -> Result<u64> {
     use anyhow::anyhow;
 

@@ -1,4 +1,4 @@
-// EXT4 error type definitions
+// EXT4 错误类型定义
 
 use std::path::PathBuf;
 use thiserror::Error;

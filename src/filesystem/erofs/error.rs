@@ -1,10 +1,10 @@
-// EROFS error type definitions
+// EROFS 错误类型定义
 
 use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
 
-// EROFS operation errors
+// EROFS 操作错误
 #[derive(Error, Debug)]
 pub enum ErofsError {
     #[error("I/O error: {0}")]

@@ -1,4 +1,4 @@
-// EROFS directory processing module
+// EROFS 目录处理模块
 
 use super::volume::ErofsVolume;
 use crate::filesystem::erofs::*;
@@ -6,15 +6,15 @@ use std::io::{Read, Seek, SeekFrom};
 use zerocopy::TryFromBytes;
 
 impl ErofsVolume {
-    // Verify the validity of directory entries
+    // 校验 dirent 的合法性
     fn is_valid_dirent(&self, dirent: &ErofsDirent, offset: usize, data_len: usize) -> bool {
         let nameoff = dirent.nameoff as usize;
         let dirent_size = std::mem::size_of::<ErofsDirent>();
 
-        // Check nameoff plausibility: should be after dirents area
+        // 检查 nameoff 是否合理: 应位于 dirent 区域之后
         if nameoff < offset + dirent_size || nameoff >= data_len {
             log::debug!(
-                "  → nameoff 不合理: {} < {} || {} >= {}",
+                "  → invalid nameoff: {} < {} || {} >= {}",
                 nameoff,
                 offset + dirent_size,
                 nameoff,
@@ -23,16 +23,16 @@ impl ErofsVolume {
             return false;
         }
 
-        // Check file_type plausibility (0-7 are valid file types)
+        // 检查 file_type 是否合理 (0-7 为合法文件类型)
         if dirent.file_type > 7 {
-            log::debug!("  → file_type 不合理: {}", dirent.file_type);
+            log::debug!("  → invalid file_type: {}", dirent.file_type);
             return false;
         }
 
         true
     }
 
-    // Read directory data
+    // 读取目录数据
     fn read_dir_data(&mut self, inode_info: &InodeInfo, data_layout: u16) -> Result<Vec<u8>> {
         let block_size = self.block_size as usize;
 
@@ -50,31 +50,31 @@ impl ErofsVolume {
                 total_size
             );
 
-            // FLAT_INLINE layout may contain two parts of data:
-            // 1. External block: the previous complete block is stored in the raw_blkaddr location
-            // 2. Inline data: The last data less than one block is inlined behind the inode
+            // FLAT_INLINE 布局可能包含两部分数据:
+            // 1. 外部块: 前面的完整块存放在 raw_blkaddr 指向的位置
+            // 2. inline 数据: 末尾不足一个块的数据 inline 在 inode 之后
             let mut combined_data = Vec::with_capacity(total_size);
 
             if inode_info.raw_blkaddr != 0xFFFFFFFF {
-                // There is an external block
-                // Calculate the number and size of external blocks (excluding the last incomplete block)
+                // 存在外部块
+                // 计算外部块的数量与大小 (不含末尾不完整的块)
                 let external_blocks = total_size / block_size;
                 let external_size = external_blocks * block_size;
                 let inline_size = total_size - external_size;
 
                 log::debug!(
-                    "  外部块: {} 个块 = {} 字节 (从块地址 {} 开始)",
+                    "  external blocks: {} blocks = {} bytes (starting at blkaddr {})",
                     external_blocks,
                     external_size,
                     inode_info.raw_blkaddr
                 );
                 log::debug!(
-                    "  内联数据: {} 字节 (在 offset {} 处)",
+                    "  inline data: {} bytes (at offset {})",
                     inline_size,
                     inline_offset
                 );
 
-                // 1. Read external block
+                // 1. 读取外部块
                 if external_size > 0 {
                     let external_offset = inode_info.raw_blkaddr as u64 * block_size as u64;
                     self.file.seek(SeekFrom::Start(external_offset))?;
@@ -85,17 +85,17 @@ impl ErofsVolume {
                         return Err(ErofsError::Io(std::io::Error::new(
                             std::io::ErrorKind::UnexpectedEof,
                             format!(
-                                "期望读取 {} 字节外部数据，实际只读取了 {} 字节",
+                                "expected {} bytes of external data, only read {} bytes",
                                 external_size, n
                             ),
                         )));
                     }
 
                     combined_data.extend_from_slice(&external_data);
-                    log::debug!("  ✓ 读取外部块: {} 字节", n);
+                    log::debug!("  ✓ read external blocks: {} bytes", n);
                 }
 
-                // 2. Read inline data
+                // 2. 读取 inline 数据
                 if inline_size > 0 {
                     self.file.seek(SeekFrom::Start(inline_offset))?;
                     let mut inline_data = vec![0u8; inline_size];
@@ -105,19 +105,19 @@ impl ErofsVolume {
                         return Err(ErofsError::Io(std::io::Error::new(
                             std::io::ErrorKind::UnexpectedEof,
                             format!(
-                                "期望读取 {} 字节内联数据，实际只读取了 {} 字节",
+                                "expected {} bytes of inline data, only read {} bytes",
                                 inline_size, n
                             ),
                         )));
                     }
 
                     combined_data.extend_from_slice(&inline_data);
-                    log::debug!("  ✓ 读取内联数据: {} 字节", n);
+                    log::debug!("  ✓ read inline data: {} bytes", n);
                 }
             } else {
-                // All data is inline (raw_blkaddr == 0xFFFFFFFF)
+                // 数据全部 inline (raw_blkaddr == 0xFFFFFFFF)
                 log::debug!(
-                    "  全部内联: {} 字节 (在 offset {} 处)",
+                    "  fully inline: {} bytes (at offset {})",
                     total_size,
                     inline_offset
                 );
@@ -129,12 +129,12 @@ impl ErofsVolume {
                 if n < total_size {
                     return Err(ErofsError::Io(std::io::Error::new(
                         std::io::ErrorKind::UnexpectedEof,
-                        format!("期望读取 {} 字节，实际只读取了 {} 字节", total_size, n),
+                        format!("expected {} bytes, only read {} bytes", total_size, n),
                     )));
                 }
 
                 combined_data = inline_data;
-                log::debug!("  ✓ 读取内联数据: {} 字节", n);
+                log::debug!("  ✓ read inline data: {} bytes", n);
             }
 
             combined_data
@@ -143,17 +143,17 @@ impl ErofsVolume {
         };
 
         if !data.is_empty() {
-            log::debug!("目录数据总长度: {} 字节", data.len());
-            // Output the first few bytes for debugging
+            log::debug!("total directory data length: {} bytes", data.len());
+            // 输出前若干字节便于调试
             if data.len() >= 16 {
-                log::debug!("前 16 字节: {:02X?}", &data[0..16]);
+                log::debug!("first 16 bytes: {:02X?}", &data[0..16]);
             }
         }
 
         Ok(data)
     }
 
-    // Parse directory entry array
+    // 解析 dirent 数组
     fn parse_dirents(&self, data: &[u8], max_parse_size: usize) -> Vec<ErofsDirent> {
         let dirent_size = std::mem::size_of::<ErofsDirent>();
         let mut dirents = Vec::new();
@@ -168,19 +168,19 @@ impl ErofsVolume {
                 let file_type = dirent.file_type;
 
                 log::debug!(
-                    "扫描 offset {}: nid={}, nameoff={}, type={}",
+                    "scanning offset {}: nid={}, nameoff={}, type={}",
                     offset,
                     nid,
                     nameoff,
                     file_type
                 );
 
-                // Verify dirent legality
+                // 校验 dirent 合法性
                 if !self.is_valid_dirent(&dirent, offset, data.len()) {
                     break;
                 }
 
-                log::debug!("  → 有效 dirent");
+                log::debug!("  → valid dirent");
                 dirents.push(dirent);
                 offset += dirent_size;
             } else {
@@ -188,62 +188,62 @@ impl ErofsVolume {
             }
         }
 
-        log::debug!("找到 {} 个 dirent", dirents.len());
+        log::debug!("found {} dirents", dirents.len());
         dirents
     }
 
-    // Extract directory entries from dirents (resolve names)
+    // 从 dirent 中提取目录条目 (解析名称)
     fn extract_dir_entries(&self, data: &[u8], dirents: &[ErofsDirent]) -> Vec<(String, u64, u8)> {
         let mut entries = Vec::new();
 
         for (idx, dirent) in dirents.iter().enumerate() {
-            // Copy packed struct fields to local variables to avoid alignment issues
+            // 将 packed 结构体字段复制到局部变量, 避免对齐问题
             let nid = dirent.nid;
             let nameoff = dirent.nameoff as usize;
             let file_type = dirent.file_type;
 
-            // Calculating name length: looking for null bytes
+            // 计算名称长度: 查找空字节
             let max_search_len = if idx + 1 < dirents.len() {
-                // has next dirent: limit search to next nameoff
+                // 存在下一个 dirent: 将查找范围限制到下一个 nameoff
                 let next_nameoff = dirents[idx + 1].nameoff as usize;
                 if next_nameoff > nameoff {
                     (next_nameoff - nameoff).min(255)
                 } else {
-                    // nameoff order is wrong, skip
+                    // nameoff 顺序异常, 跳过
                     log::debug!(
-                        "  → nameoff 顺序错误: next={} <= current={}",
+                        "  → nameoff out of order: next={} <= current={}",
                         next_nameoff,
                         nameoff
                     );
                     continue;
                 }
             } else {
-                // The last one: Find the end of the data
+                // 最后一个: 查找至数据末尾
                 (data.len() - nameoff).min(255)
             };
 
-            // Find the end of a filename within a limited range
-            // EROFS filename terminated by null byte or control character
+            // 在受限范围内查找文件名结尾
+            // EROFS 文件名以空字节或控制字符结束
             let name_bytes_search = &data[nameoff..nameoff + max_search_len];
 
-            // Find null bytes
+            // 查找空字节
             let null_pos = name_bytes_search.iter().position(|&b| b == 0);
 
-            // Find the first control character (0x01-0x1F, excluding printable characters)
-            // Filename should contain only printable characters (>= 0x20)
+            // 查找第一个控制字符 (0x01-0x1F, 不含可打印字符)
+            // 文件名应仅包含可打印字符 (>= 0x20)
             let ctrl_pos = name_bytes_search.iter().position(|&b| b > 0 && b < 0x20);
 
-            // Use the smallest position as the actual file name length
+            // 取最小的位置作为实际文件名长度
             let name_len = match (null_pos, ctrl_pos) {
-                (Some(n), Some(c)) => n.min(c), // There are null and control characters, whichever is the smallest
-                (Some(n), None) => n,           // only null
-                (None, Some(c)) => c,           // only control characters
-                (None, None) => max_search_len, // None, use full range
+                (Some(n), Some(c)) => n.min(c), // 空字节与控制字符均存在, 取较小者
+                (Some(n), None) => n,           // 仅有空字节
+                (None, Some(c)) => c,           // 仅有控制字符
+                (None, None) => max_search_len, // 均不存在, 使用完整范围
             };
 
             if nameoff + name_len > data.len() {
                 log::debug!(
-                    "  → 名称超出范围: {} + {} > {}",
+                    "  → name out of range: {} + {} > {}",
                     nameoff,
                     name_len,
                     data.len()
@@ -263,7 +263,7 @@ impl ErofsVolume {
                 name
             );
 
-            // Skip "." and ".."
+            // 跳过 "." 与 ".."
             if name != "." && name != ".." && !name.is_empty() {
                 entries.push((name, nid, file_type));
             }
@@ -272,9 +272,9 @@ impl ErofsVolume {
         entries
     }
 
-    // Read directory
+    // 读取目录
     pub fn read_dir(&mut self, inode_info: &InodeInfo) -> Result<Vec<(String, u64, u8)>> {
-        log::debug!("\n=== 读取目录 nid={} ===", inode_info.nid);
+        log::debug!("\n=== reading directory nid={} ===", inode_info.nid);
 
         let data_layout = (inode_info.format >> EROFS_I_DATALAYOUT_BIT) & EROFS_I_DATALAYOUT_MASK;
 
@@ -285,7 +285,7 @@ impl ErofsVolume {
             )));
         }
 
-        // Read entire directory data
+        // 读取整个目录数据
         let data = self.read_dir_data(inode_info, data_layout)?;
 
         if data.is_empty() {
@@ -295,31 +295,31 @@ impl ErofsVolume {
         let mut all_entries = Vec::new();
         let block_size = self.block_size as usize;
 
-        // Parse directories in logical chunks (each chunk has its own dirents and names table)
+        // 按逻辑块解析目录 (每个块有独立的 dirent 区与名称表)
         let mut pos = 0;
         while pos < data.len() {
             let block_end = (pos + block_size).min(data.len());
             let block_data = &data[pos..block_end];
 
             log::debug!(
-                "解析目录块: pos={}, block_size={}, data.len()={}",
+                "parsing directory block: pos={}, block_size={}, data.len()={}",
                 pos,
                 block_end - pos,
                 data.len()
             );
 
-            // Parse the dirents of this block
+            // 解析该块内的 dirent
             let dirents = self.parse_dirents(block_data, block_data.len());
             let entries = self.extract_dir_entries(block_data, &dirents);
 
-            log::debug!("块 @ pos={} 找到 {} 个条目", pos, entries.len());
+            log::debug!("block @ pos={} found {} entries", pos, entries.len());
 
             all_entries.extend(entries);
             pos = block_end;
         }
 
         log::debug!(
-            "=== 目录 nid={} 解析完成，找到 {} 个有效条目 ===\n",
+            "=== directory nid={} parsed, found {} valid entries ===\n",
             inode_info.nid,
             all_entries.len()
         );

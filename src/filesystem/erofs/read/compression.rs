@@ -1,4 +1,4 @@
-// EROFS compressed file reader
+// EROFS 压缩文件读取器
 
 use super::volume::ErofsVolume;
 use crate::compression::{Algorithm, Decompressor};
@@ -6,7 +6,7 @@ use crate::filesystem::erofs::*;
 use std::io::{Read, Seek, SeekFrom};
 use zerocopy::TryFromBytes;
 
-// Parameters for a compressed file read operation.
+// 压缩文件读取操作所需的参数
 struct CompressionParams {
     header_offset: u64,
     algorithm_head1: u8,
@@ -27,13 +27,13 @@ impl ErofsVolume {
             inode_info.raw_blkaddr
         );
 
-        // 1. Locate compression metadata: inode offset + inode size + xattr size, aligned to 8 bytes.
-        // For COMPRESSED_COMPACT format, compression metadata (header + indexes) is stored inline after the inode.
+        // 1. 定位压缩元数据: inode 偏移 + inode 大小 + xattr 大小, 按 8 字节对齐
+        // COMPRESSED_COMPACT 格式下, 压缩元数据 (map header 与索引) inline 存放在 inode 之后
         let inode_offset = self.nid_to_offset(inode_info.nid);
         let inode_size = if inode_info.is_compact { 32 } else { 64 };
         let xattr_size = self.xattr_ibody_size(inode_info.xattr_icount);
 
-        // Align to 8-byte boundary.
+        // 对齐到 8 字节边界
         let header_offset = ((inode_offset + inode_size + xattr_size as u64) + 7) & !7;
 
         log::debug!(
@@ -44,7 +44,7 @@ impl ErofsVolume {
             xattr_size
         );
 
-        // 2. Read z_erofs_map_header
+        // 2. 读取 z_erofs_map_header
         self.file.seek(SeekFrom::Start(header_offset))?;
         let mut header_bytes = vec![0u8; std::mem::size_of::<ZErofsMapHeader>()];
         self.file.read_exact(&mut header_bytes)?;
@@ -62,7 +62,7 @@ impl ErofsVolume {
         let cluster_size = 1u32 << cluster_bits;
         let z_advise = header.h_advise;
 
-        // 3. Read and decompress all required clusters.
+        // 3. 读取并解压所需的全部 cluster
         let num_clusters = inode_info.size.div_ceil(cluster_size as u64) as usize;
 
         log::debug!(
@@ -75,7 +75,7 @@ impl ErofsVolume {
             z_advise
         );
 
-        // Read the full compressed file (multi-cluster).
+        // 读取完整的压缩文件 (多 cluster)
         self.read_multi_cluster_compressed_file(
             inode_info,
             CompressionParams {
@@ -89,15 +89,15 @@ impl ErofsVolume {
         )
     }
 
-    // Bit-packed index decode helper.
-    // Extracts one index entry from a bit-packed buffer.
-    // Args: lobits - number of low bits, buffer - data buffer, bit_pos - starting bit position.
-    // Returns: (lo_value, type)
+    // 位压缩索引解码辅助函数
+    // 从位压缩缓冲区中取出一条索引项
+    // 参数: lobits - 低位位数, buffer - 数据缓冲区, bit_pos - 起始比特位置
+    // 返回: (lo_value, type)
     fn decode_compactedbits(lobits: u32, buffer: &[u8], bit_pos: u32) -> (u32, u16) {
         let byte_offset = (bit_pos / 8) as usize;
         let bit_offset = bit_pos % 8;
 
-        // Read a 32-bit little-endian value.
+        // 读取一个 32 位小端值
         if byte_offset + 4 > buffer.len() {
             return (0, 0);
         }
@@ -109,10 +109,10 @@ impl ErofsVolume {
             buffer[byte_offset + 3],
         ]) >> bit_offset;
 
-        // Extract the low-bit value.
+        // 取出低位数值
         let lo = v & ((1 << lobits) - 1);
 
-        // Extract the 2-bit type field.
+        // 取出 2 位的类型字段
         let lcluster_type = ((v >> lobits) & 3) as u16;
 
         (lo, lcluster_type)
@@ -125,7 +125,7 @@ impl ErofsVolume {
     ) -> Result<Vec<u8>> {
         use std::collections::HashMap;
 
-        // Destructure params.
+        // 解构参数
         let CompressionParams {
             header_offset,
             algorithm_head1,
@@ -135,15 +135,15 @@ impl ErofsVolume {
             z_advise,
         } = params;
 
-        // Cache of decompressed pcluster data: pblk -> decompressed data.
-        // A single pblk always uses one compression algorithm, so algorithm is not part of the key.
+        // 已解压 pcluster 数据的缓存: pblk -> 解压后的数据
+        // 同一个 pblk 只会使用一种压缩算法, 因此键中不包含算法
         let mut pcluster_cache: HashMap<u32, Vec<u8>> = HashMap::new();
 
-        // Data block list: (logical address, data).
-        // Sorted by LA before assembling the final file.
+        // 数据块列表: (逻辑地址, 数据)
+        // 组装最终文件前按 LA 排序
         let mut data_blocks: Vec<(u64, Vec<u8>)> = Vec::new();
 
-        // Compute bit-packing parameters.
+        // 计算位压缩参数
         let cluster_bits = (cluster_size as f32).log2() as u32;
         const Z_EROFS_LI_D0_CBLKCNT: u32 = 1 << 11;
         let lobits = cluster_bits.max((Z_EROFS_LI_D0_CBLKCNT as f32).log2() as u32 + 1);
@@ -154,12 +154,12 @@ impl ErofsVolume {
             lobits
         );
 
-        // Determine vcnt (lclusters per pack) and amortizedshift (log2 of bytes per index).
-        // Order matters: check smaller cluster_bits first.
+        // 确定 vcnt (每个 pack 的 lcluster 数) 与 amortizedshift (每条索引字节数的 log2)
+        // 判断顺序不可颠倒: 先检查较小的 cluster_bits
         let (vcnt, amortizedshift) = if cluster_bits <= 12 {
-            (16, 1) // 2 bytes/index, 16 per pack (compact mode)
+            (16, 1) // 每条索引 2 字节, 每个 pack 16 条 (compact 模式)
         } else if cluster_bits <= 14 {
-            (2, 2) // 4 bytes/index, 2 per pack (standard mode)
+            (2, 2) // 每条索引 4 字节, 每个 pack 2 条 (标准模式)
         } else {
             return Err(ErofsError::UnsupportedFeature(format!(
                 "cluster_bits {} too large",
@@ -167,18 +167,18 @@ impl ErofsVolume {
             )));
         };
 
-        // Compute encoded bits per index.
+        // 计算每条索引占用的编码比特数
         // encodebits = ((vcnt << amortizedshift) - 4) * 8 / vcnt
         let _encodebits = (((vcnt << amortizedshift) - 4) * 8) / vcnt;
 
-        // Index region start offset.
+        // 索引区起始偏移
         let ebase = header_offset + 8;
 
-        // Compute mixed index format parameters (per erofs-utils lib/zmap.c:126-130).
-        // compacted_4b_initial: first few clusters use 4-byte indexes for 32-byte alignment.
+        // 计算混合索引格式参数 (参考 erofs-utils lib/zmap.c:126-130)
+        // compacted_4b_initial: 起始若干 cluster 使用 4 字节索引以对齐到 32 字节
         let compacted_4b_initial = (((32 - (ebase % 32)) / 4) & 7) as usize;
 
-        // compacted_2b: middle clusters using 2-byte indexes (must be a multiple of 16).
+        // compacted_2b: 中间使用 2 字节索引的 cluster (必须是 16 的倍数)
         let compacted_2b = if (z_advise & 0x1) != 0 && compacted_4b_initial < num_clusters {
             // Z_EROFS_ADVISE_COMPACTED_2B = 0x0001
             ((num_clusters - compacted_4b_initial) / 16) * 16
@@ -186,7 +186,7 @@ impl ErofsVolume {
             0
         };
 
-        // compacted_4b_end: remaining clusters use 4-byte indexes.
+        // compacted_4b_end: 剩余 cluster 使用 4 字节索引
         let compacted_4b_end = num_clusters - compacted_4b_initial - compacted_2b;
 
         log::debug!(
@@ -197,10 +197,10 @@ impl ErofsVolume {
             num_clusters
         );
 
-        // Compute total index buffer size.
-        // Each pack occupies pack_size bytes, including index data and stored_pblk (last 4 bytes).
-        // 4b pack (vcnt=2, amortizedshift=2): pack_size = 2 << 2 = 8 bytes
-        // 2b pack (vcnt=16, amortizedshift=1): pack_size = 16 << 1 = 32 bytes
+        // 计算索引缓冲区总大小
+        // 每个 pack 占用 pack_size 字节, 含索引数据与 stored_pblk (末尾 4 字节)
+        // 4b pack (vcnt=2, amortizedshift=2): pack_size = 2 << 2 = 8 字节
+        // 2b pack (vcnt=16, amortizedshift=1): pack_size = 16 << 1 = 32 字节
         let num_packs_4b_initial = compacted_4b_initial.div_ceil(2); // vcnt=2
         let num_packs_2b = compacted_2b.div_ceil(16); // vcnt=16
         let num_packs_4b_end = compacted_4b_end.div_ceil(2); // vcnt=2
@@ -219,7 +219,7 @@ impl ErofsVolume {
             n
         );
 
-        // Print first 64 bytes of index buffer in hex.
+        // 以十六进制打印索引缓冲区前 64 字节
         if indices_buffer.len() >= 64 {
             log::debug!(
                 "index buffer first 64 bytes: {:02x?}",
@@ -229,23 +229,23 @@ impl ErofsVolume {
             log::debug!("index buffer all bytes: {:02x?}", &indices_buffer);
         }
 
-        // Helper closure: compute pack parameters for a given lcn.
+        // 辅助闭包: 计算指定 lcn 对应的 pack 参数
         let calc_pack_params = |target_lcn: usize| -> (usize, usize, usize, usize, usize, u32) {
             let mut adjusted_lcn = target_lcn;
             let mut pos = 0usize;
             let mut amortizedshift_local = 2;
-            let mut region_start = 0usize; // start offset of the current region
+            let mut region_start = 0usize; // 当前区域的起始偏移
 
             if adjusted_lcn >= compacted_4b_initial {
                 pos += compacted_4b_initial * 4;
-                region_start = compacted_4b_initial * 4; // 2-byte region starts here
+                region_start = compacted_4b_initial * 4; // 2 字节索引区从此处开始
                 adjusted_lcn -= compacted_4b_initial;
 
                 if adjusted_lcn < compacted_2b {
                     amortizedshift_local = 1;
                 } else {
                     pos += compacted_2b * 2;
-                    region_start = compacted_4b_initial * 4 + compacted_2b * 2; // 4-byte tail region starts here
+                    region_start = compacted_4b_initial * 4 + compacted_2b * 2; // 4 字节尾部区从此处开始
                     adjusted_lcn -= compacted_2b;
                 }
             }
@@ -259,7 +259,7 @@ impl ErofsVolume {
             };
             let pack_size = vcnt_local << amortizedshift_local;
 
-            // pack_start should be aligned relative to the start of the current region.
+            // pack_start 需相对当前区域的起点对齐
             let pos_in_region = pos - region_start;
             let pack_start_in_region = (pos_in_region / pack_size) * pack_size;
             let pack_start = region_start + pack_start_in_region;
@@ -274,14 +274,14 @@ impl ErofsVolume {
                     indices_buffer[pblk_offset + 3],
                 ])
             } else {
-                // For an incomplete pack (last pack), stored_pblk may only have partial bytes.
-                // Try to read from an alternate position.
+                // 不完整的 pack (最后一个 pack) 中, stored_pblk 可能只有部分字节
+                // 尝试从备用位置读取
                 let encodebits_for_calc = ((pack_size - 4) * 8) / vcnt_local;
                 let index_bytes = encodebits_for_calc.div_ceil(8);
                 let alt_pblk_offset = pos + index_bytes;
 
                 if alt_pblk_offset + 4 <= indices_buffer.len() {
-                    // Can read a full 4 bytes.
+                    // 可以读取完整的 4 字节
                     log::debug!(
                         "Cluster {}: incomplete pack, reading full stored_pblk from alt offset: offset={}",
                         target_lcn,
@@ -294,7 +294,7 @@ impl ErofsVolume {
                         indices_buffer[alt_pblk_offset + 3],
                     ])
                 } else {
-                    // Incomplete pack not enough bytes to store stored_pblk, use raw_blkaddr as fallback
+                    // 不完整的 pack 没有足够字节存放 stored_pblk, 回退使用 raw_blkaddr
                     log::debug!(
                         "Cluster {}: incomplete pack has no stored_pblk, falling back to raw_blkaddr={}",
                         target_lcn,
@@ -316,13 +316,13 @@ impl ErofsVolume {
             )
         };
 
-        // Decompress all clusters.
-        // Two passes: pass 1 handles all HEAD and PLAIN clusters (fills cache),
-        //             pass 2 handles all NONHEAD clusters (uses cache).
+        // 解压全部 cluster
+        // 分两遍: 第一遍处理所有 HEAD 与 PLAIN cluster (填充缓存),
+        //         第二遍处理所有 NONHEAD cluster (使用缓存)
 
-        // Pass 1: handle PLAIN and HEAD clusters.
+        // 第一遍: 处理 PLAIN 与 HEAD cluster
         for lcn in 0..num_clusters {
-            // Compute index parameters for this lcn.
+            // 计算该 lcn 的索引参数
             let (
                 pack_offset,
                 in_pack_idx,
@@ -332,7 +332,7 @@ impl ErofsVolume {
                 stored_pblk,
             ) = calc_pack_params(lcn);
 
-            // Decode the index for this cluster.
+            // 解码该 cluster 的索引
             let bit_pos = (in_pack_idx * pack_encodebits) as u32;
             let (lo, lcluster_type) =
                 Self::decode_compactedbits(lobits, &indices_buffer[pack_offset..], bit_pos);
@@ -348,9 +348,9 @@ impl ErofsVolume {
                 stored_pblk
             );
 
-            // Handle different lcluster types.
+            // 按 lcluster 类型分别处理
             if lcluster_type == Z_EROFS_LCLUSTER_TYPE_NONHEAD {
-                // Skip NONHEAD in pass 1; handled in pass 2.
+                // 第一遍跳过 NONHEAD, 留到第二遍处理
                 log::debug!(
                     "Cluster {}: NONHEAD (delta={}) - skipped in pass 1",
                     lcn,
@@ -359,20 +359,20 @@ impl ErofsVolume {
                 continue;
             }
 
-            // Compute physical block address.
-            // Per erofs-utils lib/zmap.c z_erofs_load_compact_lcluster (lines 218-242):
+            // 计算物理块地址
+            // 参考 erofs-utils lib/zmap.c 中 z_erofs_load_compact_lcluster (第 218-242 行):
             // pblk = stored_pblk + nblk
-            // where nblk is computed by scanning backward from the current cluster to pack start:
-            // - for each non-NONHEAD cluster: nblk++
-            // - for NONHEAD with CBLKCNT flag: nblk += cblks, i--
-            // - for NONHEAD without CBLKCNT: i -= (delta - 2) (big_pcluster only)
+            // 其中 nblk 由当前 cluster 向前扫描至 pack 起点得出:
+            // - 每遇到一个非 NONHEAD cluster: nblk++
+            // - 带 CBLKCNT 标志的 NONHEAD: nblk += cblks, i--
+            // - 不带 CBLKCNT 的 NONHEAD: i -= (delta - 2) (仅 big pcluster)
 
             let big_pcluster = (z_advise & Z_EROFS_ADVISE_BIG_PCLUSTER_1) != 0;
-            // Important: in non-big_pcluster mode nblk starts at 1 (see erofs-utils zmap.c:207).
+            // 注意: 非 big pcluster 模式下 nblk 从 1 开始 (见 erofs-utils zmap.c:207)
             let mut nblk = if !big_pcluster { 1u32 } else { 0u32 };
 
             if !big_pcluster {
-                // nblk calculation for non-big_pcluster mode.
+                // 非 big pcluster 模式下的 nblk 计算
                 let mut i = in_pack_idx as i32;
                 while i > 0 {
                     i -= 1;
@@ -392,7 +392,7 @@ impl ErofsVolume {
                     }
                 }
             } else {
-                // nblk calculation for big_pcluster mode.
+                // big pcluster 模式下的 nblk 计算
                 let mut i = in_pack_idx as i32;
                 while i > 0 {
                     i -= 1;
@@ -404,15 +404,15 @@ impl ErofsVolume {
                     );
 
                     if scan_type == Z_EROFS_LCLUSTER_TYPE_NONHEAD {
-                        // Check CBLKCNT flag (bit 11 for lobits=12).
+                        // 检查 CBLKCNT 标志 (lobits=12 时位于 bit 11)
                         let cblkcnt_bit = 1u32 << (lobits - 1);
                         if (scan_lo & cblkcnt_bit) != 0 {
                             i -= 1;
                             nblk += scan_lo & !(cblkcnt_bit);
                             continue;
                         }
-                        // big_pcluster should not have plain d0 == 1.
-                        // lo=0 may appear in edge cases; skip for now.
+                        // big pcluster 下不应出现普通的 d0 == 1
+                        // 边界情况下可能出现 lo=0, 此处暂时跳过
                         if scan_lo == 0 {
                             log::debug!(
                                 "[WARN] big_pcluster NONHEAD with lo=0 at cluster {}, i={}",
@@ -448,12 +448,12 @@ impl ErofsVolume {
                 pblk
             );
 
-            // clusterofs is used for HEAD type.
+            // clusterofs 用于 HEAD 类型
             let clusterofs = lo;
 
-            // Handle data by type.
+            // 按类型处理数据
             if lcluster_type == 0 {
-                // PLAIN: Uncompressed data or special cases
+                // PLAIN: 未压缩数据或特殊情况
                 if pblk == 0 || pblk == 0xFFFFFFFF {
                     continue;
                 }
@@ -474,8 +474,8 @@ impl ErofsVolume {
                 let n = self.file.read(&mut chunk)?;
                 chunk.truncate(n);
                 if n > 0 {
-                    // Logical address of a PLAIN cluster = (lcn << cluster_bits) | clusterofs.
-                    // Per erofs-utils zmap.c, PLAIN and HEAD use the same LA calculation.
+                    // PLAIN cluster 的逻辑地址 = (lcn << cluster_bits) | clusterofs
+                    // 按 erofs-utils zmap.c, PLAIN 与 HEAD 使用相同的 LA 计算方式
                     let logical_address = ((lcn as u64) << cluster_bits) | (clusterofs as u64);
                     log::debug!(
                         "Cluster {}: PLAIN LA={} (lcn={}, clusterofs={}), read {} bytes",
@@ -490,14 +490,14 @@ impl ErofsVolume {
             } else if lcluster_type == Z_EROFS_LCLUSTER_TYPE_HEAD1
                 || lcluster_type == Z_EROFS_LCLUSTER_TYPE_HEAD2
             {
-                // HEAD: compressed data; determine the number of compressed blocks.
+                // HEAD: 压缩数据, 需确定压缩块数量
                 let big_pcluster = (z_advise & Z_EROFS_ADVISE_BIG_PCLUSTER_1) != 0;
 
-                // Select algorithm based on HEAD1 or HEAD2.
-                // Note: if algorithm_head2=0, no separate HEAD2 algorithm; fall back to HEAD1.
+                // 依据 HEAD1 或 HEAD2 选择算法
+                // 注意: algorithm_head2=0 表示没有独立的 HEAD2 算法, 回退到 HEAD1
                 let algorithm = if lcluster_type == Z_EROFS_LCLUSTER_TYPE_HEAD2 {
                     if algorithm_head2 == 0 {
-                        algorithm_head1 // HEAD2 has no dedicated algorithm; fall back to HEAD1
+                        algorithm_head1 // HEAD2 无专用算法, 回退到 HEAD1
                     } else {
                         algorithm_head2
                     }
@@ -512,13 +512,13 @@ impl ErofsVolume {
                     algorithm
                 );
 
-                // Per erofs-utils/lib/zmap.c z_erofs_get_extent_compressedlen:
-                // in non-big_pcluster mode, default compressedblks = 1.
-                // in big_pcluster mode, read from NONHEAD CBLKCNT flag.
+                // 参考 erofs-utils/lib/zmap.c 中 z_erofs_get_extent_compressedlen:
+                // 非 big pcluster 模式下, compressedblks 默认为 1
+                // big pcluster 模式下, 从 NONHEAD 的 CBLKCNT 标志中读取
                 let mut num_blocks = 1u32;
 
                 if big_pcluster && lcn + 1 < num_clusters {
-                    // Compute index parameters for the next cluster.
+                    // 计算下一个 cluster 的索引参数
                     let (
                         next_pack_offset,
                         next_in_pack_idx,
@@ -543,11 +543,11 @@ impl ErofsVolume {
                         next_lo
                     );
 
-                    // If the next cluster is NONHEAD and has the CBLKCNT flag.
+                    // 若下一个 cluster 为 NONHEAD 且带有 CBLKCNT 标志
                     if next_type == Z_EROFS_LCLUSTER_TYPE_NONHEAD {
                         let cblkcnt_flag = Z_EROFS_LI_D0_CBLKCNT;
                         if (next_lo & cblkcnt_flag) != 0 {
-                            // Extract compressed block count (strip the flag bit).
+                            // 取出压缩块数量 (去掉标志位)
                             num_blocks = next_lo & !cblkcnt_flag;
                             log::debug!(
                                 "Cluster {}: detected CBLKCNT flag, next_lo=0x{:x}, num_blocks={}",
@@ -561,13 +561,13 @@ impl ErofsVolume {
 
                 log::debug!("Cluster {}: final num_blocks={}", lcn, num_blocks);
 
-                // Compute m_llen (logical length of the extent) first.
-                // This value is used as expected_size during decompression.
+                // 先计算 m_llen (extent 的逻辑长度)
+                // 解压时该值作为 expected_size 使用
                 let m_la = ((lcn as u64) << cluster_bits) | (clusterofs as u64);
                 let mut m_llen = inode_info.size.checked_sub(m_la).ok_or_else(|| {
                     ErofsError::Io(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("无效的逻辑偏移: m_la={} > i_size={}", m_la, inode_info.size),
+                        format!("invalid offset: m_la={} > i_size={}", m_la, inode_info.size),
                     ))
                 })?;
                 let mut scan_lcn = lcn + 1;
@@ -597,7 +597,7 @@ impl ErofsVolume {
                         if next_la <= m_la {
                             return Err(ErofsError::Io(std::io::Error::new(
                                 std::io::ErrorKind::InvalidData,
-                                format!("无效的 extent 边界: next_la={} <= m_la={}", next_la, m_la),
+                                format!("invalid extent: next_la={} <= m_la={}", next_la, m_la),
                             )));
                         }
                         m_llen = next_la - m_la;
@@ -618,7 +618,7 @@ impl ErofsVolume {
                     }
                 }
 
-                // Check cache.
+                // 检查缓存
                 let cache_key = pblk;
                 let decompressed_pcluster = if let Some(cached_data) =
                     pcluster_cache.get(&cache_key)
@@ -626,7 +626,7 @@ impl ErofsVolume {
                     log::debug!("Cluster {}: pcluster cache hit pblk={}", lcn, pblk);
                     cached_data.clone()
                 } else {
-                    // Cache miss: read from disk and decompress.
+                    // 缓存未命中: 从磁盘读取并解压
                     log::debug!(
                         "Cluster {}: cache miss, reading from disk pblk={}, algorithm={}, m_llen={}",
                         lcn,
@@ -637,7 +637,7 @@ impl ErofsVolume {
 
                     let data_offset = (pblk as u64).saturating_mul(self.block_size as u64);
 
-                    // Compressed data size = num_blocks * block_size.
+                    // 压缩数据大小 = num_blocks * block_size
                     let compressed_size = num_blocks as usize * self.block_size as usize;
 
                     log::debug!(
@@ -660,31 +660,31 @@ impl ErofsVolume {
                         n
                     );
 
-                    // Use m_llen as expected_size (decompressed size of the pcluster).
+                    // 以 m_llen 作为 expected_size (pcluster 解压后的大小)
                     let expected_size = usize::try_from(m_llen).map_err(|_| {
                         ErofsError::Io(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            format!("解压目标大小超过平台限制: {}", m_llen),
+                            format!("decompressed size exceeds platform limit: {}", m_llen),
                         ))
                     })?;
                     let mut pcluster_data = Vec::new();
 
-                    // Note: algorithm=0 in some images means using the default compression algorithm (such as LZ4/LZ4HC)
-                    // Instead of "uncompressed"! So you need to try LZ4 decompression
-                    // Try LZ4 decompression (algorithm=0 or Z_EROFS_COMPRESSION_LZ4)
+                    // 注意: 部分镜像中 algorithm=0 表示使用默认压缩算法 (如 LZ4/LZ4HC),
+                    // 而不是"未压缩", 因此仍需尝试 LZ4 解压
+                    // 尝试 LZ4 解压 (algorithm=0 或 Z_EROFS_COMPRESSION_LZ4)
                     if algorithm == 0 || algorithm == Z_EROFS_COMPRESSION_LZ4 {
                         match self.decompress_lz4(&compressed_data, expected_size) {
                             Ok(chunk) => {
                                 log::debug!(
-                                    "Cluster {}: LZ4 解压缩成功 {} -> {} 字节",
+                                    "Cluster {}: LZ4 decompressed {} -> {} bytes",
                                     lcn,
                                     compressed_data.len(),
                                     chunk.len()
                                 );
-                                // Output the first 16 bytes for debugging
+                                // 输出前 16 字节便于调试
                                 if chunk.len() >= 16 {
                                     log::debug!(
-                                        "Cluster {}: pcluster前16字节: {:02x?}",
+                                        "Cluster {}: pcluster first 16 bytes: {:02x?}",
                                         lcn,
                                         &chunk[0..16]
                                     );
@@ -692,11 +692,11 @@ impl ErofsVolume {
                                 pcluster_data = chunk;
                             }
                             Err(e) => {
-                                log::debug!("Cluster {}: LZ4 解压缩失败: {:?}", lcn, e);
+                                log::debug!("Cluster {}: LZ4 decompression failed: {:?}", lcn, e);
                             }
                         }
                     }
-                    // DEFLATE decompression (using common trait)
+                    // DEFLATE 解压 (使用通用 trait)
                     else if algorithm == Z_EROFS_COMPRESSION_DEFLATE {
                         match self.decompress_with_padding(
                             &compressed_data,
@@ -705,7 +705,7 @@ impl ErofsVolume {
                         ) {
                             Ok(chunk) => {
                                 log::debug!(
-                                    "Cluster {}: DEFLATE 解压缩成功 {} -> {} 字节",
+                                    "Cluster {}: DEFLATE decompressed {} -> {} bytes",
                                     lcn,
                                     compressed_data.len(),
                                     chunk.len()
@@ -713,11 +713,11 @@ impl ErofsVolume {
                                 pcluster_data = chunk;
                             }
                             Err(e) => {
-                                log::debug!("Cluster {}: DEFLATE 解压缩失败: {}", lcn, e);
+                                log::debug!("Cluster {}: DEFLATE decompression failed: {}", lcn, e);
                             }
                         }
                     }
-                    // LZMA decompression (using common trait)
+                    // LZMA 解压 (使用通用 trait)
                     else if algorithm == Z_EROFS_COMPRESSION_LZMA {
                         match self.decompress_with_padding(
                             &compressed_data,
@@ -726,7 +726,7 @@ impl ErofsVolume {
                         ) {
                             Ok(chunk) => {
                                 log::debug!(
-                                    "Cluster {}: LZMA 解压缩成功 {} -> {} 字节",
+                                    "Cluster {}: LZMA decompressed {} -> {} bytes",
                                     lcn,
                                     compressed_data.len(),
                                     chunk.len()
@@ -734,11 +734,11 @@ impl ErofsVolume {
                                 pcluster_data = chunk;
                             }
                             Err(e) => {
-                                log::debug!("Cluster {}: LZMA 解压缩失败: {}", lcn, e);
+                                log::debug!("Cluster {}: LZMA decompression failed: {}", lcn, e);
                             }
                         }
                     }
-                    // ZSTD decompression (using common trait)
+                    // ZSTD 解压 (使用通用 trait)
                     else if algorithm == Z_EROFS_COMPRESSION_ZSTD {
                         match self.decompress_with_padding(
                             &compressed_data,
@@ -747,7 +747,7 @@ impl ErofsVolume {
                         ) {
                             Ok(chunk) => {
                                 log::debug!(
-                                    "Cluster {}: ZSTD 解压缩成功 {} -> {} 字节",
+                                    "Cluster {}: ZSTD decompressed {} -> {} bytes",
                                     lcn,
                                     compressed_data.len(),
                                     chunk.len()
@@ -755,24 +755,24 @@ impl ErofsVolume {
                                 pcluster_data = chunk;
                             }
                             Err(e) => {
-                                log::debug!("Cluster {}: ZSTD 解压缩失败: {}", lcn, e);
+                                log::debug!("Cluster {}: ZSTD decompression failed: {}", lcn, e);
                             }
                         }
                     }
 
-                    // Cache decompressed pcluster data
+                    // 缓存解压后的 pcluster 数据
                     if !pcluster_data.is_empty() {
                         pcluster_cache.insert(cache_key, pcluster_data.clone());
                     }
                     pcluster_data
                 };
 
-                // Extract m_llen bytes from decompressed pcluster
-                // If pcluster is less than m_llen, fill it with zeros
+                // 从解压后的 pcluster 中取出 m_llen 字节
+                // 若 pcluster 不足 m_llen, 以零填充
                 let expected_size = usize::try_from(m_llen).map_err(|_| {
                     ErofsError::Io(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("extent 大小超过平台限制: {}", m_llen),
+                        format!("extent size exceeds platform limit: {}", m_llen),
                     ))
                 })?;
                 let extract_len = expected_size.min(decompressed_pcluster.len());
@@ -788,12 +788,12 @@ impl ErofsVolume {
 
                 if m_llen > 0 {
                     let extent_data = if extract_len < expected_size {
-                        // Insufficient pcluster, zero padding required
+                        // pcluster 不足, 需要零填充
                         let mut data = Vec::with_capacity(expected_size);
                         data.extend_from_slice(&decompressed_pcluster[0..extract_len]);
                         data.resize(expected_size, 0);
                         log::debug!(
-                            "Cluster {}: pcluster不足，零填充 {} 字节",
+                            "Cluster {}: pcluster too short, zero-padding {} bytes",
                             lcn,
                             expected_size - extract_len
                         );
@@ -806,25 +806,25 @@ impl ErofsVolume {
             }
         }
 
-        // Sort data blocks by logical address
+        // 按逻辑地址对数据块排序
         data_blocks.sort_by_key(|(la, _)| *la);
 
-        log::debug!("数据块排序完成，共 {} 个块", data_blocks.len());
+        log::debug!("sorted data blocks, {} blocks in total", data_blocks.len());
 
-        // Assemble final files
+        // 组装最终文件
         let file_size = usize::try_from(inode_info.size).map_err(|_| {
             ErofsError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("文件大小超过平台限制: {}", inode_info.size),
+                format!("file size exceeds platform limit: {}", inode_info.size),
             ))
         })?;
         let mut decompressed_data = Vec::with_capacity(file_size.min(8 * 1024 * 1024));
         let mut current_pos = 0u64;
 
         for (i, (la, data)) in data_blocks.iter().enumerate() {
-            // Calculate the actual length of the current extent:
-            // If there is a next extent, truncate to the LA of the next extent
-            // Otherwise truncate to file size
+            // 计算当前 extent 的实际长度:
+            // 若存在下一个 extent, 截断到下一个 extent 的 LA
+            // 否则截断到文件大小
             let next_la = if i + 1 < data_blocks.len() {
                 data_blocks[i + 1].0
             } else {
@@ -832,16 +832,19 @@ impl ErofsVolume {
             };
 
             let actual_len = if *la + data.len() as u64 > next_la {
-                // Need to truncate
+                // 需要截断
                 if next_la > *la {
                     let truncated_len = usize::try_from(next_la - *la).map_err(|_| {
                         ErofsError::Io(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            format!("extent 截断长度超过平台限制: {}", next_la - *la),
+                            format!(
+                                "extent truncation exceeds platform limit: {}",
+                                next_la - *la
+                            ),
                         ))
                     })?;
                     log::debug!(
-                        "Extent 截断: LA={}, 原长度={}, 截断后={} (下一个LA={})",
+                        "extent truncated: LA={}, old length={}, new length={} (next LA={})",
                         la,
                         data.len(),
                         truncated_len,
@@ -849,49 +852,56 @@ impl ErofsVolume {
                     );
                     truncated_len
                 } else {
-                    // next_la <= la, skip this block
-                    log::debug!("Extent 跳过: LA={}, 下一个LA={} (重叠或乱序)", la, next_la);
+                    // next_la <= la, 跳过该块
+                    log::debug!(
+                        "extent skipped: LA={}, next LA={} (out of order)",
+                        la,
+                        next_la
+                    );
                     0
                 }
             } else {
                 data.len()
             };
 
-            // skip blocks of length 0
+            // 跳过长度为 0 的块
             if actual_len == 0 {
                 continue;
             }
 
             log::debug!(
-                "组装数据块: LA={}, 当前位置={}, 数据长度={} 字节",
+                "assembling data block: LA={}, position={}, data length={} bytes",
                 la,
                 current_pos,
                 actual_len
             );
 
-            // If LA is greater than current position, fill with 0
+            // 若 LA 大于当前位置, 用 0 填充空洞
             if *la > current_pos {
                 let gap = usize::try_from(*la - current_pos).map_err(|_| {
                     ErofsError::Io(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        format!("extent 空洞大小超过平台限制: {}", *la - current_pos),
+                        format!(
+                            "extent gap size exceeds platform limit: {}",
+                            *la - current_pos
+                        ),
                     ))
                 })?;
-                log::debug!("填充空洞: 从 {} 到 {}，共 {} 字节", current_pos, la, gap);
+                log::debug!("filling gap: from {} to {}, {} bytes", current_pos, la, gap);
                 decompressed_data.resize(decompressed_data.len() + gap, 0);
                 current_pos = *la;
             }
 
-            // Write data (truncated length)
+            // 写入数据 (按截断后的长度)
             decompressed_data.extend_from_slice(&data[..actual_len]);
             current_pos += actual_len as u64;
         }
 
-        // Truncate to actual file size
+        // 截断到实际文件大小
         decompressed_data.truncate(file_size);
 
         log::debug!(
-            "多 cluster 解压缩完成: {} 字节（期望 {} 字节）",
+            "multi-cluster decompression done: {} bytes (expected {} bytes)",
             decompressed_data.len(),
             inode_info.size
         );
@@ -901,12 +911,12 @@ impl ErofsVolume {
 
     fn decompress_lz4(&self, compressed: &[u8], expected_size: usize) -> Result<Vec<u8>> {
         log::debug!(
-            "LZ4 解压缩: compressed_size={}, expected_size={}",
+            "LZ4 decompression: compressed_size={}, expected_size={}",
             compressed.len(),
             expected_size
         );
 
-        // Skip leading 0 bytes only if ZERO_PADDING feature flag is set
+        // 仅当启用 ZERO_PADDING 特性标志时才跳过前导零字节
         let has_zero_padding =
             (self.superblock.feature_incompat & EROFS_FEATURE_INCOMPAT_ZERO_PADDING) != 0;
         let mut start = 0;
@@ -919,18 +929,21 @@ impl ErofsVolume {
             if start >= compressed.len() {
                 return Err(ErofsError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "压缩数据全部为零",
+                    "compressed data is all zeros",
                 )));
             }
 
-            log::debug!("ZERO_PADDING特性启用，跳过 {} 字节的 0-padding", start);
+            log::debug!(
+                "ZERO_PADDING enabled, skipping {} bytes of 0-padding",
+                start
+            );
         } else {
-            log::debug!("ZERO_PADDING特性未启用，不跳过前导零字节");
+            log::debug!("ZERO_PADDING not enabled, keeping leading zero bytes");
         }
 
-        // Use the official lz4 library to decompress (supports LZ4HC)
-        // Try various expected_sizes: first use the provided one, then use a larger one
-        // Avoid using None as it may cause the first few bytes of the decompressed data to be lost
+        // 使用官方 lz4 库解压 (支持 LZ4HC)
+        // 依次尝试多个 expected_size: 先用传入值, 再逐步放大
+        // 避免使用 None, 否则可能丢失解压数据开头的若干字节
         let sizes_to_try = [
             Some(expected_size as i32),
             Some((expected_size * 2) as i32),
@@ -945,7 +958,7 @@ impl ErofsVolume {
             match lz4::block::decompress(&compressed[start..], *size_opt) {
                 Ok(decompressed) => {
                     log::debug!(
-                        "解压缩成功（尝试{}，size={:?}）: {} 字节",
+                        "decompressed (attempt {}, size={:?}): {} bytes",
                         idx + 1,
                         size_opt,
                         decompressed.len()
@@ -953,36 +966,36 @@ impl ErofsVolume {
                     return Ok(decompressed);
                 }
                 Err(e) if idx == sizes_to_try.len() - 1 => {
-                    log::debug!("LZ4 官方库所有尝试都失败: {:?}", e);
+                    log::debug!("all attempts with the LZ4 library failed: {:?}", e);
                 }
                 Err(_) => {
-                    // Continue to try the next size
+                    // 继续尝试下一个大小
                 }
             }
         }
 
-        // Fallback to lz4_flex (may work for some formats)
-        // Method 1: Use lz4_flex standard decompression
+        // 回退到 lz4_flex (对部分格式可能有效)
+        // 方式一: 使用 lz4_flex 标准解压
         if let Ok(decompressed) = lz4_flex::decompress(&compressed[start..], expected_size) {
-            log::debug!("解压缩成功（lz4_flex）: {} 字节", decompressed.len());
+            log::debug!("decompressed (lz4_flex): {} bytes", decompressed.len());
             return Ok(decompressed);
         }
 
-        log::debug!("所有 LZ4 解压缩方法都失败");
+        log::debug!("all LZ4 decompression methods failed");
         Err(ErofsError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "所有 LZ4 解压缩方法都失败",
+            "all LZ4 decompression methods failed",
         )))
     }
 
-    // General decompression helper functions: handle the ZERO_PADDING attribute and call the decompressor
+    // 通用解压辅助函数: 处理 ZERO_PADDING 特性并调用解压器
     fn decompress_with_padding(
         &self,
         compressed: &[u8],
         expected_size: usize,
         decompressor: Box<dyn Decompressor>,
     ) -> Result<Vec<u8>> {
-        // Check ZERO_PADDING feature flag
+        // 检查 ZERO_PADDING 特性标志
         let has_zero_padding =
             (self.superblock.feature_incompat & EROFS_FEATURE_INCOMPAT_ZERO_PADDING) != 0;
         let mut start = 0;
@@ -993,24 +1006,28 @@ impl ErofsVolume {
             }
 
             if start > 0 {
-                log::debug!("{} ZERO_PADDING 跳过 {} 字节", decompressor.name(), start);
+                log::debug!(
+                    "{} ZERO_PADDING skipped {} bytes",
+                    decompressor.name(),
+                    start
+                );
             }
         }
 
         if start >= compressed.len() {
             return Err(ErofsError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "压缩数据全部为零",
+                "compressed data is all zeros",
             )));
         }
 
-        // Call decompressor
+        // 调用解压器
         decompressor
             .decompress(&compressed[start..], expected_size)
             .map_err(|e| {
                 ErofsError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("{} 解压缩失败: {}", decompressor.name(), e),
+                    format!("{} decompression failed: {}", decompressor.name(), e),
                 ))
             })
     }

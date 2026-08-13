@@ -1,11 +1,9 @@
-// Container layer module
-//
-// Provides sparse image, super partition and OTA payload container formats.
+// 容器层，提供 sparse、Super 分区和 OTA payload 格式支持。
 
 pub mod payload;
 pub mod sparse;
 pub mod super_partition;
 
-// Re-export commonly used types
+// 重导出常用类型
 pub use sparse::SparseReader;
 pub use super_partition::{ExtractConfig, LpMetadata, extract_image};

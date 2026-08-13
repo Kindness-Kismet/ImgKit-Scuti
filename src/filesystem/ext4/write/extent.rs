@@ -1,22 +1,22 @@
-// EXT4 Extent Builder
+// EXT4 extent 构建器
 
 use crate::filesystem::ext4::types::*;
 use zerocopy::IntoBytes;
 
-// Extent builder
+// extent 构建器
 pub struct ExtentBuilder {
     extents: Vec<Ext4Extent>,
 }
 
 impl ExtentBuilder {
-    // Create a new extent builder
+    // 创建新的 extent 构建器
     pub fn new() -> Self {
         ExtentBuilder {
             extents: Vec::new(),
         }
     }
 
-    // add an extent
+    // 添加一个 extent
     pub fn add_extent(&mut self, logical_block: u32, physical_block: u64, length: u16) {
         let extent = Ext4Extent {
             ee_block: logical_block,
@@ -27,7 +27,7 @@ impl ExtentBuilder {
         self.extents.push(extent);
     }
 
-    // Create extents from a list of blocks
+    // 从块列表创建 extent
     pub fn from_blocks(blocks: &[u64]) -> Self {
         let mut builder = ExtentBuilder::new();
 
@@ -35,17 +35,17 @@ impl ExtentBuilder {
             return builder;
         }
 
-        // Merge consecutive blocks
+        // 合并连续的块
         let mut start_block = blocks[0];
         let mut logical_block = 0u32;
         let mut length = 1u16;
 
         for i in 1..blocks.len() {
             if blocks[i] == blocks[i - 1] + 1 && length < 32768 {
-                // Continuous blocks, increasing length
+                // 块连续, 增加长度
                 length += 1;
             } else {
-                // Discontinuous, create a new extent
+                // 块不连续, 创建新的 extent
                 builder.add_extent(logical_block, start_block, length);
                 logical_block += length as u32;
                 start_block = blocks[i];
@@ -53,30 +53,30 @@ impl ExtentBuilder {
             }
         }
 
-        // Add the last extent
+        // 添加最后一个 extent
         builder.add_extent(logical_block, start_block, length);
 
         builder
     }
 
-    // Build extent tree (stored in i_block of inode)
+    // 构建 extent tree (存放在 inode 的 i_block 中)
     pub fn build_inline(&self) -> [u8; 60] {
         let mut data = [0u8; 60];
 
-        // Extent header
+        // extent 头部
         let header = Ext4ExtentHeader {
             eh_magic: EXT4_EXTENT_HEADER_MAGIC,
             eh_entries: self.extents.len().min(4) as u16,
-            eh_max: 4,   // Up to 4 extents in inode
-            eh_depth: 0, // leaf node
+            eh_max: 4,   // inode 内最多 4 个 extent
+            eh_depth: 0, // 叶子节点
             eh_generation: 0,
         };
 
-        // write header
+        // 写入 extent header
         let header_bytes = header.as_bytes();
         data[..header_bytes.len()].copy_from_slice(header_bytes);
 
-        // write extents
+        // 写入 extent
         let mut offset = header_bytes.len();
         for extent in self.extents.iter().take(4) {
             let extent_bytes = extent.as_bytes();
@@ -87,12 +87,12 @@ impl ExtentBuilder {
         data
     }
 
-    // Get extent quantity
+    // 获取 extent 数量
     pub fn len(&self) -> usize {
         self.extents.len()
     }
 
-    // Is it empty
+    // 判断是否为空
     pub fn is_empty(&self) -> bool {
         self.extents.is_empty()
     }
@@ -122,7 +122,7 @@ mod tests {
         let blocks = vec![100, 101, 102, 103, 200, 201];
         let builder = ExtentBuilder::from_blocks(&blocks);
 
-        // Should be merged into 2 extents
+        // 应合并为 2 个 extent
         assert_eq!(builder.len(), 2);
     }
 
@@ -133,7 +133,7 @@ mod tests {
 
         let data = builder.build_inline();
 
-        // Verify the magic number
+        // 校验魔数
         let magic = u16::from_le_bytes([data[0], data[1]]);
         assert_eq!(magic, EXT4_EXTENT_HEADER_MAGIC);
     }

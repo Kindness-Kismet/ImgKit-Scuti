@@ -1,4 +1,4 @@
-// EROFS volume operations module
+// EROFS 卷操作模块
 
 use crate::filesystem::erofs::*;
 use std::fs::File;
@@ -12,7 +12,7 @@ pub struct ErofsVolume {
 }
 
 impl ErofsVolume {
-    // Create a new ErofsVolume instance by reading and validating the superblock.
+    // 读取并校验 superblock, 创建新的 ErofsVolume 实例
     pub fn new(mut file: File) -> Result<Self> {
         file.seek(SeekFrom::Start(EROFS_SUPER_OFFSET))?;
         let mut sb_bytes = vec![0u8; std::mem::size_of::<ErofsSuperBlock>()];
@@ -34,7 +34,7 @@ impl ErofsVolume {
 
         let block_size = superblock.block_size();
 
-        // Copy packed struct fields to avoid alignment issues.
+        // 复制 packed 结构体字段, 避免对齐问题
         let blkszbits = superblock.blkszbits;
         let meta_blkaddr = superblock.meta_blkaddr;
         let root_nid = superblock.root_nid;
@@ -54,14 +54,14 @@ impl ErofsVolume {
         })
     }
 
-    // Read and decode an inode by its NID.
+    // 按 nid 读取并解析 inode
     pub fn read_inode(&mut self, nid: u64) -> Result<InodeInfo> {
         log::debug!("read inode: nid={}", nid);
         let inode_offset = self.nid_to_offset(nid);
         log::debug!("  inode_offset={}", inode_offset);
         self.file.seek(SeekFrom::Start(inode_offset))?;
 
-        // Peek at i_format to determine compact vs extended layout.
+        // 预读 i_format 以判断是 compact inode 还是 extended inode
         let mut peek_buf = [0u8; 2];
         self.file.read_exact(&mut peek_buf)?;
         let i_format = u16::from_le_bytes(peek_buf);
@@ -85,7 +85,7 @@ impl ErofsVolume {
                 mode: inode.i_mode,
                 uid: inode.i_uid as u32,
                 gid: inode.i_gid as u32,
-                // When bit 4 of i_format is clear, nlink is stored in i_nb union.
+                // i_format 的 bit 4 为 0 时, nlink 存放在 i_nb union 中
                 nlink: if (inode.i_format & (1 << 4)) == 0 {
                     unsafe { inode.i_nb.nlink as u32 }
                 } else {
@@ -139,7 +139,7 @@ impl ErofsVolume {
         }
     }
 
-    // Convert a NID to its absolute byte offset in the image.
+    // 将 nid 转换为镜像中的绝对字节偏移
     pub(crate) fn nid_to_offset(&self, nid: u64) -> u64 {
         let meta_blkaddr = self.superblock.meta_blkaddr as u64;
         meta_blkaddr
@@ -147,7 +147,7 @@ impl ErofsVolume {
             .saturating_add(nid.saturating_mul(32))
     }
 
-    // Compute the xattr ibody size from erofs_fs.h erofs_xattr_ibody_size():
+    // 按 erofs_fs.h 中 erofs_xattr_ibody_size() 的定义计算 xattr ibody 大小:
     // sizeof(erofs_xattr_ibody_header) + sizeof(__u32) * (i_xattr_icount - 1)
     pub(crate) fn xattr_ibody_size(&self, i_xattr_icount: u16) -> usize {
         if i_xattr_icount == 0 {
@@ -157,7 +157,7 @@ impl ErofsVolume {
         }
     }
 
-    // Return the root directory NID from the superblock.
+    // 返回 superblock 中记录的根目录 nid
     pub fn root_nid(&self) -> u64 {
         self.superblock.root_nid as u64
     }

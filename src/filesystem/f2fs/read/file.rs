@@ -11,15 +11,15 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
         }
         if inode.size > MAX_FILE_SIZE {
             return Err(F2fsError::InvalidData(format!(
-                "文件大小 {} 超过最大允许大小 {}",
+                "file size {} exceeds maximum allowed size {}",
                 inode.size, MAX_FILE_SIZE
             )));
         }
 
-        // Check if it is inline data
+        // 检查是否为 inline data
         if inode.inline & F2FS_INLINE_DATA != 0 {
             let node_data = self.read_node(nid)?;
-            // Inline data starts after i_addr reserved slot, offset depends on extra_attr
+            // inline data 起始于 i_addr 保留槽之后, 偏移取决于 extra_attr
             let inline_offset = if inode.inline & F2FS_EXTRA_ATTR != 0 {
                 360 + inode.extra_isize as usize + 4
             } else {
@@ -35,7 +35,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
 
         let blocks = self.read_data_blocks(inode, nid)?;
 
-        // Splicing block data
+        // 拼接 block 数据
         let mut data = Vec::with_capacity((inode.size as usize).min(8 * 1024 * 1024));
         let mut remaining = inode.size;
 
@@ -61,7 +61,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
         let expected_blocks = inode.size.div_ceil(F2FS_BLKSIZE as u64);
         let total_blocks = inode.blocks.min(expected_blocks);
 
-        // Read direct address
+        // 读取直接地址
         let node_data = self.read_node(nid)?;
         let direct_addrs = self.get_direct_addrs(&node_data, inode, nid);
 
@@ -77,11 +77,11 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
                     continue;
                 }
                 BlockAddr::Compress => {
-                    // Handling Compressed Clusters: Finding the Actual Compressed Data Blocks
-                    let cluster_size = 4; // F2FS defaults to 4 blocks per cluster
+                    // 处理 compression cluster: 定位实际的压缩数据 block
+                    let cluster_size = 4; // F2FS 默认每个 cluster 4 个 block
                     let mut compressed_blocks = Vec::new();
 
-                    // Collect all blocks in the cluster
+                    // 收集 cluster 内的所有 block
                     for j in 0..cluster_size {
                         if i + j >= direct_addrs.len() {
                             break;
@@ -96,7 +96,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
                         }
                     }
 
-                    // Unzip
+                    // 解压
                     if !compressed_blocks.is_empty() {
                         let decompressed =
                             self.decompress_cluster(&compressed_blocks, cluster_size)?;
@@ -123,7 +123,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             }
         }
 
-        // Read indirect address
+        // 读取间接地址
         if blocks_read < total_blocks {
             let indirect =
                 self.read_indirect_blocks(inode, nid, blocks_read, total_blocks - blocks_read)?;
@@ -138,13 +138,13 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
         compressed_blocks: &[Vec<u8>],
         cluster_size: usize,
     ) -> Result<Vec<Vec<u8>>> {
-        // F2FS compression format: 24-byte header + compressed data
-        // Header: clen(4) + chksum(4) + reserved(16)
+        // F2FS 压缩格式: 24 字节头部 + 压缩数据
+        // 头部: clen(4) + chksum(4) + reserved(16)
         if compressed_blocks.is_empty() {
             return Ok(vec![vec![0u8; F2FS_BLKSIZE]; cluster_size]);
         }
 
-        // Splice all compressed blocks
+        // 拼接所有压缩 block
         let mut compressed_data = Vec::new();
         for block in compressed_blocks {
             compressed_data.extend_from_slice(block);
@@ -154,7 +154,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             return Ok(vec![vec![0u8; F2FS_BLKSIZE]; cluster_size]);
         }
 
-        // Read header
+        // 读取头部
         let mut cursor = Cursor::new(&compressed_data[..24]);
         let clen = cursor.read_u32::<LittleEndian>()? as usize;
         let _chksum = cursor.read_u32::<LittleEndian>()?;
@@ -163,20 +163,20 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             return Ok(vec![vec![0u8; F2FS_BLKSIZE]; cluster_size]);
         }
 
-        // Decompress data
+        // 解压数据
         let compressed_payload = &compressed_data[24..24 + clen];
         let decompressed_size = cluster_size * F2FS_BLKSIZE;
 
-        // Try LZ4 decompression
+        // 尝试 LZ4 解压
         let decompressed = match lz4_flex::decompress(compressed_payload, decompressed_size) {
             Ok(data) => data,
             Err(_) => {
-                // Decompression failed, returning zero blocks
+                // 解压失败, 返回全零 block
                 return Ok(vec![vec![0u8; F2FS_BLKSIZE]; cluster_size]);
             }
         };
 
-        // split into chunks
+        // 按 block 切分
         let mut blocks = Vec::new();
         for i in 0..cluster_size {
             let start = i * F2FS_BLKSIZE;
@@ -238,7 +238,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
 
         let mut blocks_read = 0u64;
 
-        // i_nid[0-1]: direct node
+        // i_nid[0-1]: 指向 direct node
         for _i in 0..2 {
             if blocks_read >= count {
                 break;
@@ -253,7 +253,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             }
         }
 
-        // i_nid[2-3]: single indirect node (fix: read NID array)
+        // i_nid[2-3]: 指向 single indirect node (其中存放的是 nid 数组)
         for _i in 2..4 {
             if blocks_read >= count {
                 break;
@@ -284,7 +284,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             if let Ok(addr) = cursor.read_u32::<LittleEndian>() {
                 match BlockAddr::from(addr) {
                     BlockAddr::Null => {
-                        // Check if all remaining addresses are sparse
+                        // 检查剩余地址是否全部为稀疏
                         let mut all_sparse = true;
                         let mut temp_cursor = cursor.clone();
                         for _ in (i + 1)..max_addrs {
@@ -304,11 +304,11 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
                         i += 1;
                     }
                     BlockAddr::Compress => {
-                        // Handling compressed clusters
+                        // 处理 compression cluster
                         let cluster_size = 4;
                         let mut compressed_blocks = Vec::new();
 
-                        // Collect all block addresses in the cluster
+                        // 收集 cluster 内的所有 block 地址
                         let mut cluster_addrs = vec![addr];
                         for j in 1..cluster_size {
                             if i + j >= max_addrs {
@@ -319,7 +319,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
                             }
                         }
 
-                        // Read the actual compressed data block
+                        // 读取实际的压缩数据 block
                         for cluster_addr in &cluster_addrs {
                             if *cluster_addr != COMPRESS_ADDR
                                 && *cluster_addr != NULL_ADDR
@@ -330,7 +330,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
                             }
                         }
 
-                        // Unzip
+                        // 解压
                         if !compressed_blocks.is_empty() {
                             let decompressed =
                                 self.decompress_cluster(&compressed_blocks, cluster_size)?;
@@ -340,7 +340,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
                                 }
                             }
                         } else {
-                            // If there is no compressed data, zero blocks are padded
+                            // 没有压缩数据时以全零 block 填充
                             for _ in 0..cluster_size {
                                 if blocks.len() < count as usize {
                                     blocks.push(vec![0u8; F2FS_BLKSIZE]);
@@ -367,7 +367,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
         Ok(blocks)
     }
 
-    // Fix: Single indirect node contains NID array, not block address
+    // single indirect node 中存放的是 nid 数组, 而非 block 地址
     fn read_single_indirect(&self, nid: Nid, count: u64, inode: &Inode) -> Result<Vec<Vec<u8>>> {
         let node_data = self.read_node(nid)?;
         let mut blocks = Vec::new();
@@ -392,15 +392,15 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
         Ok(blocks)
     }
 
-    // Read symbolic link target path
+    // 读取符号链接目标路径
     pub fn read_symlink_target(&self, inode: &Inode, nid: Nid) -> Result<String> {
         let data = self.read_file_data(inode, nid)?;
 
-        // Intercept the actual data length according to inode.size and remove excess zero bytes
+        // 按 inode.size 截取实际数据长度, 去除多余的零字节
         let actual_len = (inode.size as usize).min(data.len());
         let trimmed_data = &data[..actual_len];
 
-        // Remove trailing null terminator
+        // 去除末尾的 NUL 终止符
         let target = if !trimmed_data.is_empty() && trimmed_data[trimmed_data.len() - 1] == 0 {
             String::from_utf8_lossy(&trimmed_data[..trimmed_data.len() - 1]).to_string()
         } else {

@@ -1,6 +1,6 @@
-// EROFS read module
+// EROFS 读取模块
 //
-// Provides EROFS image reading and file extraction functions
+// 提供 EROFS 镜像的读取与文件提取功能
 
 pub mod compression;
 pub mod directory;
@@ -9,6 +9,6 @@ pub mod file;
 pub mod volume;
 pub mod xattr;
 
-// Re-export common types
+// 重导出常用类型
 pub use extractor::*;
 pub use volume::ErofsVolume;

@@ -25,11 +25,11 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
     fn parse_dir_block(&self, block: &[u8]) -> Result<Vec<DirEntry>> {
         let mut entries = Vec::new();
 
-        // Directory block structure:
-        // - Bitmap: 27 bytes
-        // - Reserved: 3 bytes
-        // - Directory entries: 214 * 11 bytes
-        // - Filenames: 214 * 8 bytes
+        // 目录 block 结构:
+        // - bitmap: 27 字节
+        // - 保留区: 3 字节
+        // - 目录项: 214 * 11 字节
+        // - 文件名区: 214 * 8 字节
 
         let bitmap_size = 27; // (214 + 7) / 8
         let reserved_size = 3;
@@ -67,7 +67,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             let name_len = cursor.read_u16::<LittleEndian>()? as usize;
             let file_type = cursor.read_u8()?;
 
-            // name_len=0 means continuation slot, not a new dentry
+            // name_len 为 0 表示续接 slot, 而非新的 dentry
             if name_len == 0 || name_len > F2FS_NAME_LEN {
                 i += 1;
                 continue;

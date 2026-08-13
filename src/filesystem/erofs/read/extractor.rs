@@ -1,4 +1,4 @@
-// EROFS filesystem extractor
+// EROFS 文件系统提取器
 
 use super::volume::ErofsVolume;
 use crate::filesystem::erofs::*;
@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 use zerocopy::TryFromBytes;
 
-// Configuration for an extraction run.
+// 提取任务的配置
 pub struct ExtractConfig {
     pub input_image: String,
     pub output_dir: String,
@@ -43,7 +43,7 @@ impl VfsCapData {
         Self::try_read_from_bytes(bytes).ok()
     }
 
-    // Compute the effective capability mask from the VFS cap structure (v2 only).
+    // 从 VFS capability 结构计算 effective 掩码 (仅支持 v2)
     fn effective(&self) -> u64 {
         let magic = self.magic_etc;
         let version = magic & 0xFF000000;
@@ -61,7 +61,7 @@ impl VfsCapData {
     }
 }
 
-// A pending file or symlink extraction task.
+// 待提取的文件或符号链接任务
 #[derive(Clone)]
 struct FileTask {
     inode_info: InodeInfo,
@@ -70,7 +70,7 @@ struct FileTask {
     link_target: String,
 }
 
-// Entry point: extract files and metadata from an EROFS image.
+// 入口: 从 EROFS 镜像中提取文件与元数据
 pub fn extract_image(config: ExtractConfig) -> anyhow::Result<()> {
     let fs_config_output_path = config.fs_config_path.as_ref().map(PathBuf::from);
     let file_contexts_output_path = config.file_contexts_path.as_ref().map(PathBuf::from);
@@ -123,7 +123,7 @@ fn extract(
     let mut stack = vec![(root_inode, PathBuf::from("/"))];
     let mut visited = HashSet::new();
 
-    // Phase 1: walk the directory tree and collect file tasks.
+    // 阶段一: 遍历目录树并收集文件任务
     let mut file_tasks = Vec::new();
     while let Some((inode_info, path)) = stack.pop() {
         if !visited.insert(path.clone()) {
@@ -157,7 +157,7 @@ fn extract(
         }
 
         let output_path = join_output_path(&extract_root, &path)
-            .map_err(|e| anyhow::anyhow!("无效输出路径 {:?}: {}", path, e))?;
+            .map_err(|e| anyhow::anyhow!("invalid output path {:?}: {}", path, e))?;
 
         if let Some(parent) = output_path.parent() {
             fs::create_dir_all(parent)?;
@@ -169,7 +169,7 @@ fn extract(
                 let safe_name = match sanitize_single_component(&name) {
                     Ok(value) => value,
                     Err(err) => {
-                        log::warn!("跳过非法目录项 {:?}: {}", name, err);
+                        log::warn!("skipping invalid directory entry {:?}: {}", name, err);
                         continue;
                     }
                 };
@@ -184,7 +184,7 @@ fn extract(
                 }
             }
         } else if is_regular(&inode_info) || is_symlink(&inode_info) {
-            // Defer extraction to the parallel phase.
+            // 推迟到并行阶段再提取
             file_tasks.push(FileTask {
                 inode_info: inode_info.clone(),
                 path: path.clone(),
@@ -194,7 +194,7 @@ fn extract(
         }
     }
 
-    // Phase 2: extract files in parallel, each thread opens its own file handle.
+    // 阶段二: 并行提取文件, 每个线程独立打开文件句柄
     let image_path_arc = Arc::new(image_path.to_path_buf());
     let extracted_count = Arc::new(AtomicUsize::new(0));
     let failed_count = Arc::new(AtomicUsize::new(0));
@@ -228,7 +228,10 @@ fn extract(
                     failed_count.fetch_add(1, Ordering::Relaxed);
                 }
             } else {
-                log::warn!("线程内 EROFS volume 初始化失败，跳过 {:?}", task.path);
+                log::warn!(
+                    "failed to init EROFS volume in thread, skipping {:?}",
+                    task.path
+                );
                 failed_count.fetch_add(1, Ordering::Relaxed);
             }
 
@@ -255,7 +258,10 @@ fn extract(
 
     let failed = failed_count.load(Ordering::Relaxed);
     if failed > 0 {
-        return Err(anyhow::anyhow!("EROFS 提取存在 {} 个失败条目", failed));
+        return Err(anyhow::anyhow!(
+            "EROFS extraction had {} failed entries",
+            failed
+        ));
     }
 
     Ok(())
@@ -273,7 +279,7 @@ fn is_symlink(inode: &InodeInfo) -> bool {
     (inode.mode & 0xF000) == 0xA000
 }
 
-// Extract xattrs from an inode, populating SELinux contexts and capability strings.
+// 读取 inode 的 xattr, 填充 SELinux context 与 capability 字符串
 fn extract_xattrs(
     volume: &mut ErofsVolume,
     inode: &InodeInfo,

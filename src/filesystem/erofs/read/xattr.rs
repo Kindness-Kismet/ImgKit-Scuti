@@ -1,4 +1,4 @@
-// EROFS xattr reading module
+// EROFS xattr 读取模块
 
 use super::volume::ErofsVolume;
 use crate::filesystem::erofs::*;
@@ -6,7 +6,7 @@ use std::io::{Read, Seek, SeekFrom};
 use zerocopy::TryFromBytes;
 
 impl ErofsVolume {
-    // Read the xattr (extended attributes) of a file
+    // 读取文件的 xattr (扩展属性)
     pub fn read_xattrs(&mut self, inode_info: &InodeInfo) -> Result<Vec<(String, Vec<u8>)>> {
         if inode_info.xattr_icount == 0 {
             return Ok(Vec::new());
@@ -24,7 +24,7 @@ impl ErofsVolume {
             ErofsXattrIbodyHeader::try_read_from_bytes(&header_bytes[..]).map_err(|_| {
                 ErofsError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "解析 xattr ibody header 失败",
+                    "failed to parse xattr ibody header",
                 ))
             })?;
 
@@ -36,7 +36,7 @@ impl ErofsVolume {
         let inline_xattr_size = xattr_isize.saturating_sub(header_size);
 
         log::debug!(
-            "读取 xattr: nid={}, xattr_icount={}, shared_count={}, xattr_blkaddr={}, xattr_isize={}, inline_size={}",
+            "reading xattr: nid={}, xattr_icount={}, shared_count={}, xattr_blkaddr={}, xattr_isize={}, inline_size={}",
             inode_info.nid,
             inode_info.xattr_icount,
             shared_count,
@@ -66,21 +66,24 @@ impl ErofsVolume {
             log::debug!("  shared_xattr_ids: {:?}", shared_xattr_ids);
 
             for xattr_id in shared_xattr_ids {
-                log::debug!("  尝试读取 shared xattr_id={}", xattr_id);
+                log::debug!("  trying to read shared xattr_id={}", xattr_id);
                 match self.read_shared_xattr(xattr_id) {
                     Ok(xattr_list) => {
-                        log::debug!("    成功读取 {} 个 xattr", xattr_list.len());
+                        log::debug!("    read {} xattrs successfully", xattr_list.len());
                         xattrs.extend(xattr_list);
                     }
                     Err(e) => {
-                        log::debug!("    读取失败: {:?}", e);
+                        log::debug!("    read failed: {:?}", e);
                     }
                 }
             }
         }
 
         if inline_xattr_size > 0 {
-            log::debug!("  尝试读取 inline xattr，大小 {} 字节", inline_xattr_size);
+            log::debug!(
+                "  trying to read inline xattr, size {} bytes",
+                inline_xattr_size
+            );
 
             let inline_xattr_offset = xattr_header_offset + header_size as u64;
 
@@ -89,7 +92,7 @@ impl ErofsVolume {
             self.file.read_exact(&mut inline_data)?;
 
             log::debug!(
-                "  inline xattr 数据前16字节: {:02x?}",
+                "  inline xattr first 16 bytes: {:02x?}",
                 if inline_data.len() >= 16 {
                     &inline_data[0..16]
                 } else {
@@ -99,11 +102,14 @@ impl ErofsVolume {
 
             match self.parse_xattr_entries(&inline_data, true) {
                 Ok(inline_xattrs) => {
-                    log::debug!("    成功解析 {} 个 inline xattr", inline_xattrs.len());
+                    log::debug!(
+                        "    parsed {} inline xattrs successfully",
+                        inline_xattrs.len()
+                    );
                     xattrs.extend(inline_xattrs);
                 }
                 Err(e) => {
-                    log::debug!("    解析 inline xattr 失败: {:?}", e);
+                    log::debug!("    failed to parse inline xattr: {:?}", e);
                 }
             }
         }
@@ -136,7 +142,7 @@ impl ErofsVolume {
         block_data.truncate(n);
 
         log::debug!(
-            "    读取了 {} 字节数据，前16字节: {:02x?}",
+            "    read {} bytes of data, first 16 bytes: {:02x?}",
             n,
             if n >= 16 {
                 &block_data[0..16]
@@ -173,7 +179,7 @@ impl ErofsVolume {
             );
 
             if e_name_len == 0 {
-                log::debug!("    遇到空 entry，结束解析");
+                log::debug!("    empty entry encountered, stopping parse");
                 break;
             }
 
@@ -181,7 +187,7 @@ impl ErofsVolume {
 
             let name_len = e_name_len as usize;
             if read_offset + name_len > data.len() {
-                log::debug!("    名称长度超出范围");
+                log::debug!("    name length out of range");
                 break;
             }
 
@@ -198,7 +204,7 @@ impl ErofsVolume {
 
             let value_size = e_value_size as usize;
             if read_offset + value_size > data.len() {
-                log::debug!("    值大小超出范围");
+                log::debug!("    value size out of range");
                 break;
             }
 

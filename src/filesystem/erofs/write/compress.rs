@@ -1,6 +1,6 @@
-// EROFS compression support
+// EROFS 压缩支持
 //
-// Implement the packaging function of EROFS compressed files.
+// 实现 EROFS 压缩文件的打包功能.
 
 use crate::compression::Compressor;
 use crate::compression::deflate::DeflateCompressor;
@@ -10,10 +10,10 @@ use crate::compression::zstd::ZstdCompressor;
 use crate::filesystem::erofs::consts::*;
 use crate::filesystem::erofs::{ErofsError, Result};
 
-// Compression advisory flag
+// 压缩建议标志
 const Z_EROFS_ADVISE_COMPACTED_2B: u16 = 0x0001;
 
-// Compressed index structure (8 bytes)
+// 压缩索引结构 (8 字节)
 #[derive(Debug, Clone)]
 pub struct ZErofsLclusterIndex {
     pub di_advise: u16,
@@ -39,44 +39,44 @@ impl ZErofsLclusterIndex {
     }
 }
 
-// compressor factory
+// 压缩器工厂
 pub fn create_compressor(algorithm: &str, level: Option<u32>) -> Result<Box<dyn Compressor>> {
     match algorithm.to_lowercase().as_str() {
         "lz4" => Ok(Box::new(Lz4Compressor)),
         "lz4hc" => {
-            // lz4hc: 0-12, default 9
+            // lz4hc: 0-12, 默认 9
             let level = level.unwrap_or(9).min(12) as i32;
             Ok(Box::new(Lz4HcCompressor::new(level)))
         }
         "lzma" => {
-            // lzma: 0-9 (normal) or 100-109 (extreme), default 6
+            // lzma: 0-9 (常规) 或 100-109 (极限), 默认 6
             let level = level.unwrap_or(6);
-            // Verification level range
+            // 校验等级范围
             if level > 9 && !(100..=109).contains(&level) {
                 return Err(ErofsError::Io(std::io::Error::other(
-                    "lzma 压缩等级必须是 0-9 或 100-109",
+                    "lzma compression level must be 0-9 or 100-109",
                 )));
             }
             Ok(Box::new(MicroLzmaCompressor::new(level)))
         }
         "deflate" => {
-            // deflate: 0-9, default 1
+            // deflate: 0-9, 默认 1
             let level = level.unwrap_or(1).min(9);
             Ok(Box::new(DeflateCompressor::new(level)))
         }
         "zstd" => {
-            // zstd: 0-22, default 3
+            // zstd: 0-22, 默认 3
             let level = level.unwrap_or(3).min(22) as i32;
             Ok(Box::new(ZstdCompressor::new(level)))
         }
         _ => Err(ErofsError::Io(std::io::Error::other(format!(
-            "不支持的压缩算法: {}",
+            "unsupported compression algorithm: {}",
             algorithm
         )))),
     }
 }
 
-// Get compression algorithm type
+// 获取压缩算法类型
 pub fn get_algorithm_type(algorithm: &str) -> Result<u8> {
     match algorithm.to_lowercase().as_str() {
         "lz4" | "lz4hc" => Ok(Z_EROFS_COMPRESSION_LZ4),
@@ -84,31 +84,31 @@ pub fn get_algorithm_type(algorithm: &str) -> Result<u8> {
         "deflate" => Ok(Z_EROFS_COMPRESSION_DEFLATE),
         "zstd" => Ok(Z_EROFS_COMPRESSION_ZSTD),
         _ => Err(ErofsError::Io(std::io::Error::other(format!(
-            "不支持的压缩算法: {}",
+            "unsupported compression algorithm: {}",
             algorithm
         )))),
     }
 }
 
-// Physical cluster (pcluster) - a physical unit that stores compressed data
+// 物理簇 (pcluster) - 存放压缩数据的物理单元
 #[derive(Debug, Clone)]
 pub struct PhysicalCluster {
-    pub compressed_data: Vec<u8>,              // Compressed data
-    pub compressed_size: usize,                // Compressed size
-    pub logical_clusters: Vec<LogicalCluster>, // Contains logical clusters
+    pub compressed_data: Vec<u8>,              // 压缩后的数据
+    pub compressed_size: usize,                // 压缩后的大小
+    pub logical_clusters: Vec<LogicalCluster>, // 包含的逻辑簇
 }
 
-// Logical cluster (lcluster) - 4KB logical data unit
+// 逻辑簇 (lcluster) - 4KB 逻辑数据单元
 #[derive(Debug, Clone)]
 pub struct LogicalCluster {
-    pub original_size: usize, // Original data size (usually 4KB or the remaining size of the last block)
-    pub offset_in_pcluster: u16, // offset in physical cluster
-    pub is_head: bool,        // Whether it is the head of the physical cluster
-    pub is_compressed: bool,  // Whether compression is used
+    pub original_size: usize,    // 原始数据大小 (通常为 4KB 或末块的剩余大小)
+    pub offset_in_pcluster: u16, // 在物理簇内的偏移
+    pub is_head: bool,           // 是否为物理簇的头部
+    pub is_compressed: bool,     // 是否使用压缩
 }
 
-// Compress file data (using destsize strategy)
-// Returns a list of physical clusters, each physical cluster contains one or more logical clusters
+// 压缩文件数据 (采用 destsize 策略)
+// 返回物理簇列表, 每个物理簇包含一个或多个逻辑簇
 pub fn compress_file_data(
     data: &[u8],
     block_size: u32,
@@ -121,22 +121,22 @@ pub fn compress_file_data(
     while offset < data.len() {
         let remaining = data.len() - offset;
 
-        // Try to compress as much data as possible using destsize mode
+        // 使用 destsize 模式尽可能多地压缩数据
         if let Some((compressed, input_size)) =
             compressor.compress_destsize(&data[offset..], block_size_usize)
         {
-            // Align input_size down to 4KB boundaries (leaving at least one full logical cluster)
+            // 将 input_size 向下对齐到 4KB 边界 (至少保留一个完整逻辑簇)
             let aligned_input_size = (input_size / block_size_usize) * block_size_usize;
 
-            // The current implementation is first limited to a single logical cluster pcluster to avoid unpacking inconsistencies caused by multiple logical cluster paths.
+            // 当前实现先限定为单逻辑簇 pcluster, 避免多逻辑簇路径导致解包不一致.
             if aligned_input_size == block_size_usize {
-                // Recompress aligned data
+                // 对对齐后的数据重新压缩
                 let final_compressed = if aligned_input_size < input_size {
-                    // Aligned data needs to be recompressed
+                    // 对齐后的数据需要重新压缩
                     match compressor.compress(&data[offset..offset + aligned_input_size]) {
                         Ok(c) => c,
                         Err(_) => {
-                            // Compression failed, fallback to single block
+                            // 压缩失败, 回退为单块处理
                             let chunk_size = std::cmp::min(block_size_usize, remaining);
                             let chunk = &data[offset..offset + chunk_size];
                             let compressed = compressor.compress(chunk).map_err(|e| {
@@ -169,12 +169,12 @@ pub fn compress_file_data(
 
                 let final_compressed_len = final_compressed.len();
 
-                // In non-big pcluster paths, the compressed pcluster must be no more than one block.
-                // Otherwise the reader will read in single blocks, resulting in data truncation.
+                // 在非 big pcluster 路径下, 压缩后的 pcluster 不得超过一个 block.
+                // 否则读取端会按单块读取, 导致数据被截断.
                 if final_compressed_len < aligned_input_size
                     && final_compressed_len <= block_size_usize
                 {
-                    // Compression successful: Calculate how many logical clusters are included
+                    // 压缩成功: 计算包含多少个逻辑簇
                     let num_lclusters = aligned_input_size / block_size_usize;
                     let mut logical_clusters = Vec::with_capacity(num_lclusters);
 
@@ -188,7 +188,7 @@ pub fn compress_file_data(
                     }
 
                     log::debug!(
-                        "destsize 成功: 压缩 {} 字节 -> {} 字节, 包含 {} 个逻辑簇",
+                        "destsize succeeded: compressed {} bytes -> {} bytes, {} lclusters",
                         aligned_input_size,
                         final_compressed_len,
                         num_lclusters
@@ -206,7 +206,7 @@ pub fn compress_file_data(
             }
         }
 
-        // Fallback: Use fixed block size
+        // 回退: 使用固定块大小
         let chunk_size = std::cmp::min(block_size_usize, remaining);
         let chunk = &data[offset..offset + chunk_size];
 
@@ -238,8 +238,8 @@ pub fn compress_file_data(
     Ok(pclusters)
 }
 
-// Build metadata for compressed inodes (header + index)
-// Use compacted format
+// 构建压缩 inode 的元数据 (map header + 索引)
+// 采用 compacted 格式
 pub fn build_compress_metadata(
     file_size: u64,
     block_size: u32,
@@ -248,11 +248,11 @@ pub fn build_compress_metadata(
     start_blkaddr: u32,
     xattr_size: usize,
 ) -> Result<(Vec<u8>, Vec<u8>)> {
-    // Calculate cluster bits
+    // 计算簇位宽
     let cluster_bits = block_size.trailing_zeros() as u8;
     let h_clusterbits = 0u8;
 
-    // Build compression header (using COMPACTED_2B format)
+    // 构建压缩 map header (使用 COMPACTED_2B 格式)
     let mut header_bytes = vec![0u8; 8];
     header_bytes[0..2].copy_from_slice(&0u16.to_le_bytes());
     header_bytes[2..4].copy_from_slice(&0u16.to_le_bytes());
@@ -367,10 +367,10 @@ pub fn build_compress_metadata(
         Ok(())
     }
 
-    // Calculate the total number of logical clusters (calculated by file size)
+    // 计算逻辑簇总数 (按文件大小计算)
     let num_lclusters = file_size.div_ceil(block_size as u64) as usize;
 
-    // Calculate the starting physical block address of each physical cluster
+    // 计算每个物理簇的起始物理块地址
     let mut pblk_offsets = Vec::with_capacity(pclusters.len());
     let mut current_pblk = start_blkaddr;
     for pcluster in pclusters {
@@ -379,7 +379,7 @@ pub fn build_compress_metadata(
         current_pblk += pcluster_blocks;
     }
 
-    // Expand logical cluster information to legacy index semantics
+    // 将逻辑簇信息展开为 legacy 索引语义
     let mut cv = Vec::with_capacity(num_lclusters);
     for (pcluster_idx, pcluster) in pclusters.iter().enumerate() {
         let total_lc = pcluster.logical_clusters.len();
@@ -419,7 +419,7 @@ pub fn build_compress_metadata(
         ))));
     }
 
-    // Compute hybrid index layout parameters according to erofs-utils
+    // 按照 erofs-utils 计算混合索引布局参数
     let inode_plus_xattr = 32u64 + xattr_size as u64;
     let aligned_inode_xattr = (inode_plus_xattr + 7) & !7;
     let mpos = aligned_inode_xattr + 8;
@@ -449,7 +449,7 @@ pub fn build_compress_metadata(
     let mut indexes = Vec::new();
     let mut cursor = 0usize;
 
-    // Non-big_pcluster: initial blkaddr needs to be decremented by 1 and dummy_head set
+    // 非 big_pcluster: 初始 blkaddr 需减 1, 并置位 dummy_head
     let mut blkaddr = start_blkaddr.saturating_sub(1);
     let mut dummy_head = true;
 

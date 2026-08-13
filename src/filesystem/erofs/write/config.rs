@@ -1,6 +1,6 @@
-// EROFS configuration parser
+// EROFS 配置解析器
 //
-// Parse file_contexts and fs_config files.
+// 解析 file_contexts 与 fs_config 文件.
 
 #![allow(dead_code)]
 
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-// SELinux context entry
+// SELinux 上下文条目
 #[derive(Debug, Clone)]
 pub struct SelinuxEntry {
     pub pattern: String,
@@ -18,7 +18,7 @@ pub struct SelinuxEntry {
     pub context: String,
 }
 
-// SELinux context manager
+// SELinux 上下文管理器
 #[derive(Debug)]
 pub struct SelinuxContexts {
     entries: Vec<SelinuxEntry>,
@@ -26,13 +26,13 @@ pub struct SelinuxContexts {
 }
 
 impl SelinuxContexts {
-    // Load from file
+    // 从文件加载
     pub fn from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         Self::parse(&content)
     }
 
-    // Parse file_contexts content
+    // 解析 file_contexts 内容
     pub fn parse(content: &str) -> Result<Self> {
         let mut entries = Vec::new();
 
@@ -42,7 +42,7 @@ impl SelinuxContexts {
                 continue;
             }
 
-            // Format: <path_pattern> <context>
+            // 格式: <path_pattern> <context>
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
                 let pattern = parts[0];
@@ -58,7 +58,7 @@ impl SelinuxContexts {
                         });
                     }
                     Err(e) => {
-                        log::warn!("无法解析 SELinux 模式 '{}': {}", pattern, e);
+                        log::warn!("failed to parse SELinux pattern '{}': {}", pattern, e);
                     }
                 }
             }
@@ -70,7 +70,7 @@ impl SelinuxContexts {
         })
     }
 
-    // Find the SELinux context for a path
+    // 查找路径对应的 SELinux 上下文
     pub fn lookup(&mut self, path: &str) -> Option<String> {
         if let Some(ctx) = self.cache.get(path) {
             return Some(ctx.clone());
@@ -92,7 +92,7 @@ impl SelinuxContexts {
         None
     }
 
-    // SELinux context for lookup path (does not modify cache)
+    // 查找路径对应的 SELinux 上下文 (不修改缓存)
     pub fn lookup_without_mut(&self, path: &str) -> Option<String> {
         if let Some(ctx) = self.cache.get(path) {
             return Some(ctx.clone());
@@ -122,7 +122,7 @@ impl SelinuxContexts {
     }
 }
 
-// File system configuration entries
+// 文件系统配置条目
 #[derive(Debug, Clone)]
 pub struct FsConfigEntry {
     pub path: String,
@@ -132,7 +132,7 @@ pub struct FsConfigEntry {
     pub capabilities: Option<u64>,
 }
 
-// File system configuration manager
+// 文件系统配置管理器
 #[derive(Debug)]
 pub struct FsConfig {
     entries: HashMap<String, FsConfigEntry>,
@@ -143,13 +143,13 @@ pub struct FsConfig {
 }
 
 impl FsConfig {
-    // Load from file
+    // 从文件加载
     pub fn from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         Self::parse(&content)
     }
 
-    // Parse fs_config content
+    // 解析 fs_config 内容
     pub fn parse(content: &str) -> Result<Self> {
         let mut entries = HashMap::new();
 
@@ -159,7 +159,7 @@ impl FsConfig {
                 continue;
             }
 
-            // Format: <path> <uid> <gid> <mode> [capabilities]
+            // 格式: <path> <uid> <gid> <mode> [capabilities]
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 4 {
                 let path = parts[0].to_string();
@@ -200,7 +200,7 @@ impl FsConfig {
         })
     }
 
-    // Find path configuration
+    // 查找路径配置
     pub fn lookup(&self, path: &str) -> Option<&FsConfigEntry> {
         let normalized = if path.starts_with('/') {
             path.to_string()
@@ -211,7 +211,7 @@ impl FsConfig {
         self.entries.get(&normalized)
     }
 
-    // Get uid/gid/mode
+    // 获取 uid/gid/mode
     pub fn get_attrs(&self, path: &str, is_dir: bool) -> (u32, u32, u32) {
         if let Some(entry) = self.lookup(path) {
             (entry.uid, entry.gid, entry.mode)
@@ -253,7 +253,7 @@ impl Default for FsConfig {
     }
 }
 
-// EROFS build configuration
+// EROFS 构建配置
 #[derive(Debug, Clone)]
 pub struct ErofsConfig {
     pub source_dir: std::path::PathBuf,

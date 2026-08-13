@@ -1,4 +1,4 @@
-// Universal compression and decompression module
+// 通用压缩与解压缩模块
 
 pub mod deflate;
 pub mod lz4;
@@ -8,7 +8,7 @@ pub mod zstd;
 use std::error::Error;
 use std::fmt;
 
-// Compression error type
+// 压缩错误类型
 #[derive(Debug)]
 pub struct CompressionError {
     message: String,
@@ -22,7 +22,7 @@ impl CompressionError {
 
 impl fmt::Display for CompressionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "压缩错误: {}", self.message)
+        write!(f, "compression error: {}", self.message)
     }
 }
 
@@ -30,41 +30,41 @@ impl Error for CompressionError {}
 
 pub type Result<T> = std::result::Result<T, CompressionError>;
 
-// Compression algorithm decompressor trait
+// 压缩算法解压器 trait
 pub trait Decompressor: Send + Sync {
-    // Decompress data
-    // compressed: compressed data
-    // decompressed_size: expected size after decompression (required by some algorithms)
+    // 解压数据
+    // compressed: 压缩后的数据
+    // decompressed_size: 解压后的预期大小 (部分算法必须提供)
     fn decompress(&self, compressed: &[u8], decompressed_size: usize) -> Result<Vec<u8>>;
 
-    // Algorithm name
+    // 算法名称
     fn name(&self) -> &'static str;
 }
 
-// Compression algorithm compressor trait
+// 压缩算法压缩器 trait
 pub trait Compressor: Send + Sync {
-    // Compress data
-    // data: original data
+    // 压缩数据
+    // data: 原始数据
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>>;
 
-    // Compress data to specified size (destsize mode)
-    // data: original data
-    // max_output_size: maximum output size
-    // Return: (compressed data, actual input data size used)
+    // 按指定输出上限压缩数据 (destsize 模式)
+    // data: 原始数据
+    // max_output_size: 输出的最大字节数
+    // 返回: (压缩后的数据, 实际消耗的输入数据大小)
     //
-    // This method will try to compress as much of the input data as possible while ensuring that the output does not exceed max_output_size
-    // If destsize mode is not supported, return None
+    // 该方法在保证输出不超过 max_output_size 的前提下, 尽可能多地压缩输入数据
+    // 若不支持 destsize 模式, 返回 None
     fn compress_destsize(&self, data: &[u8], max_output_size: usize) -> Option<(Vec<u8>, usize)> {
-        // Default implementation: destsize mode is not supported
+        // 默认实现: 不支持 destsize 模式
         let _ = (data, max_output_size);
         None
     }
 
-    // Algorithm name
+    // 算法名称
     fn name(&self) -> &'static str;
 }
 
-// Compression algorithm enumeration
+// 压缩算法枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Algorithm {
     Lz4,
@@ -76,7 +76,7 @@ pub enum Algorithm {
 }
 
 impl Algorithm {
-    // Get the decompressor corresponding to the algorithm
+    // 获取算法对应的解压器
     pub fn decompressor(&self) -> Box<dyn Decompressor> {
         match self {
             Algorithm::Lz4 => Box::new(lz4::Lz4Decompressor),
@@ -88,7 +88,7 @@ impl Algorithm {
         }
     }
 
-    // Get algorithm from EROFS algorithm ID
+    // 根据 EROFS 算法 ID 获取算法
     pub fn from_erofs_id(id: u8) -> Option<Self> {
         match id {
             0 => Some(Algorithm::Lz4),
@@ -98,7 +98,7 @@ impl Algorithm {
         }
     }
 
-    // Get algorithm from F2FS algorithm ID
+    // 根据 F2FS 算法 ID 获取算法
     pub fn from_f2fs_id(id: u8) -> Option<Self> {
         match id {
             1 => Some(Algorithm::Lz4),

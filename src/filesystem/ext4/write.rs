@@ -1,4 +1,4 @@
-// EXT4 file system packaging module
+// EXT4 文件系统打包模块
 
 pub mod block_allocator;
 pub mod builder;

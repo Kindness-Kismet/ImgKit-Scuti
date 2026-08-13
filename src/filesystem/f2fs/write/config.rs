@@ -1,6 +1,6 @@
-// F2FS configuration parser
+// F2FS 配置解析器
 //
-// Parse file_contexts and fs_config files.
+// 解析 file_contexts 与 fs_config 文件.
 
 use crate::filesystem::f2fs::Result;
 use regex::Regex;
@@ -20,7 +20,7 @@ fn normalize_config_path(path: &str) -> String {
     normalized
 }
 
-// SELinux context entry
+// SELinux 上下文条目
 #[derive(Debug, Clone)]
 pub struct SelinuxEntry {
     pub pattern: String,
@@ -28,7 +28,7 @@ pub struct SelinuxEntry {
     pub context: String,
 }
 
-// SELinux context manager
+// SELinux 上下文管理器
 #[derive(Debug)]
 pub struct SelinuxContexts {
     entries: Vec<SelinuxEntry>,
@@ -36,13 +36,13 @@ pub struct SelinuxContexts {
 }
 
 impl SelinuxContexts {
-    // Load from file
+    // 从文件加载
     pub fn from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         Self::parse(&content)
     }
 
-    // Parse file_contexts content
+    // 解析 file_contexts 内容
     pub fn parse(content: &str) -> Result<Self> {
         let mut entries = Vec::new();
 
@@ -52,15 +52,15 @@ impl SelinuxContexts {
                 continue;
             }
 
-            // Format: <path_pattern> <context>
-            // For example: /system/bin/sh u:object_r:shell_exec:s0
+            // 格式: <path_pattern> <context>
+            // 例如: /system/bin/sh u:object_r:shell_exec:s0
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
                 let pattern = parts[0];
                 let context = parts[1];
 
-                // Convert file_contexts pattern to regular expression
-                // file_contexts uses PCRE syntax, but we need to handle some special cases
+                // 将 file_contexts 模式转换为正则表达式
+                // file_contexts 使用 PCRE 语法, 但需要处理部分特殊场景
                 let regex_pattern = format!("^{}$", pattern);
                 match Regex::new(&regex_pattern) {
                     Ok(regex) => {
@@ -71,7 +71,7 @@ impl SelinuxContexts {
                         });
                     }
                     Err(e) => {
-                        log::warn!("无法解析 SELinux 模式 '{}': {}", pattern, e);
+                        log::warn!("failed to parse SELinux pattern '{}': {}", pattern, e);
                     }
                 }
             }
@@ -83,21 +83,21 @@ impl SelinuxContexts {
         })
     }
 
-    // Find the SELinux context for a path
+    // 查找路径对应的 SELinux 上下文
     pub fn lookup(&mut self, path: &str) -> Option<String> {
-        // Check cache
+        // 检查缓存
         if let Some(ctx) = self.cache.get(path) {
             return Some(ctx.clone());
         }
 
-        // normalized path
+        // 规范化路径
         let normalized = if path.starts_with('/') {
             path.to_string()
         } else {
             format!("/{}", path)
         };
 
-        // Match from back to front, giving priority to more specific rules
+        // 从后向前匹配, 优先命中更具体的规则
         for entry in self.entries.iter().rev() {
             if entry.regex.is_match(&normalized) {
                 self.cache.insert(path.to_string(), entry.context.clone());
@@ -108,18 +108,18 @@ impl SelinuxContexts {
         None
     }
 
-    // Get the number of entries
+    // 获取条目数量
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    // Is it empty
+    // 是否为空
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 }
 
-// File system configuration entries
+// 文件系统配置条目
 #[derive(Debug, Clone)]
 pub struct FsConfigEntry {
     pub path: String,
@@ -129,7 +129,7 @@ pub struct FsConfigEntry {
     pub capabilities: Option<u64>,
 }
 
-// File system configuration manager
+// 文件系统配置管理器
 #[derive(Debug)]
 pub struct FsConfig {
     entries: HashMap<String, FsConfigEntry>,
@@ -141,13 +141,13 @@ pub struct FsConfig {
 }
 
 impl FsConfig {
-    // Load from file
+    // 从文件加载
     pub fn from_file(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         Self::parse(&content)
     }
 
-    // Parse fs_config content
+    // 解析 fs_config 内容
     pub fn parse(content: &str) -> Result<Self> {
         let mut entries = HashMap::new();
         let mut order = HashMap::new();
@@ -158,8 +158,8 @@ impl FsConfig {
                 continue;
             }
 
-            // Format: <path> <uid> <gid> <mode> [capabilities]
-            // For example: system/bin/sh 0 2000 0755
+            // 格式: <path> <uid> <gid> <mode> [capabilities]
+            // 例如: system/bin/sh 0 2000 0755
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 4 {
                 let path = parts[0].to_string();
@@ -172,7 +172,7 @@ impl FsConfig {
                     None
                 };
 
-                // normalized path
+                // 规范化路径
                 let normalized_path = normalize_config_path(&path);
                 if !order.contains_key(&normalized_path) {
                     let idx = order.len();
@@ -202,14 +202,14 @@ impl FsConfig {
         })
     }
 
-    // Find path configuration
+    // 查找路径配置
     pub fn lookup(&self, path: &str) -> Option<&FsConfigEntry> {
         let normalized = normalize_config_path(path);
 
         self.entries.get(&normalized)
     }
 
-    // Get uid/gid/mode, if not configured, return the default value
+    // 获取 uid/gid/mode, 未配置时返回默认值
     pub fn get_attrs(&self, path: &str, is_dir: bool) -> (u32, u32, u32) {
         if let Some(entry) = self.lookup(path) {
             (entry.uid, entry.gid, entry.mode)
@@ -223,7 +223,7 @@ impl FsConfig {
         }
     }
 
-    // Set default value
+    // 设置默认值
     pub fn set_defaults(&mut self, uid: u32, gid: u32, dir_mode: u32, file_mode: u32) {
         self.default_uid = uid;
         self.default_gid = gid;
@@ -231,7 +231,7 @@ impl FsConfig {
         self.default_file_mode = file_mode;
     }
 
-    // Get the number of entries
+    // 获取条目数量
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -242,7 +242,7 @@ impl FsConfig {
         self.order.get(&normalized).copied()
     }
 
-    // Is it empty
+    // 是否为空
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

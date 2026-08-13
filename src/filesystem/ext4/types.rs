@@ -1,16 +1,16 @@
-// EXT4 file system structure definition
+// EXT4 文件系统结构定义
 
 use std::io::{Read, Seek};
 use zerocopy::{FromZeros, Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
-// ext4 superblock magic number
+// ext4 superblock 魔数
 pub const EXT4_SUPERBLOCK_MAGIC: u16 = 0xEF53;
-// The magic number of ext4 extent header
+// ext4 extent header 魔数
 pub const EXT4_EXTENT_HEADER_MAGIC: u16 = 0xF30A;
-// The magic number of ext4 extended attributes (xattr) header
+// ext4 xattr header 魔数
 pub const EXT4_XATTR_HEADER_MAGIC: u32 = 0xEA020000;
 
-// Represents an ext4 volume
+// 表示一个 ext4 卷
 pub struct Ext4Volume<R: Read + Seek> {
     pub stream: R,
     pub superblock: Ext4Superblock,
@@ -18,7 +18,7 @@ pub struct Ext4Volume<R: Read + Seek> {
     pub block_size: u64,
 }
 
-// represents an inode
+// 表示一个 inode
 #[derive(Clone)]
 #[allow(dead_code)]
 pub struct Inode {
@@ -27,7 +27,7 @@ pub struct Inode {
     pub data: Vec<u8>,
 }
 
-// Represents a directory entry
+// 表示一个 dir entry
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4DirEntry2 {
@@ -37,7 +37,7 @@ pub struct Ext4DirEntry2 {
     pub file_type: u8,
 }
 
-// represents an extent
+// 表示一个 extent
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4Extent {
@@ -48,17 +48,17 @@ pub struct Ext4Extent {
 }
 
 impl Ext4Extent {
-    // Get the complete starting block number of extent on disk
+    // 获取 extent 在磁盘上的完整起始块号
     pub fn ee_start(&self) -> u64 {
         (self.ee_start_hi as u64) << 32 | self.ee_start_lo as u64
     }
 
-    // Check if extent is unwritten
+    // 判断 extent 是否为 unwritten 状态
     pub fn is_unwritten(&self) -> bool {
         self.ee_len > 32768
     }
 
-    // Get the real length of extent
+    // 获取 extent 的实际长度
     pub fn get_len(&self) -> u16 {
         if self.is_unwritten() {
             self.ee_len - 32768
@@ -68,7 +68,7 @@ impl Ext4Extent {
     }
 }
 
-// Represents the head of the extent tree
+// 表示 extent tree 的 extent header
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4ExtentHeader {
@@ -79,7 +79,7 @@ pub struct Ext4ExtentHeader {
     pub eh_generation: u32,
 }
 
-// Represents an index node in the extent tree
+// 表示 extent tree 中的索引节点
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4ExtentIdx {
@@ -90,13 +90,13 @@ pub struct Ext4ExtentIdx {
 }
 
 impl Ext4ExtentIdx {
-    // Get the complete block number of the leaf node
+    // 获取叶子节点的完整块号
     pub fn ei_leaf(&self) -> u64 {
         (self.ei_leaf_hi as u64) << 32 | self.ei_leaf_lo as u64
     }
 }
 
-// Represents a block group descriptor for a 64-bit file system
+// 表示 64 位文件系统的 group descriptor
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4GroupDescriptor {
@@ -126,13 +126,13 @@ pub struct Ext4GroupDescriptor {
 }
 
 impl Ext4GroupDescriptor {
-    // Get the complete starting block number of the inode table
+    // 获取 inode table 的完整起始块号
     pub fn bg_inode_table(&self) -> u64 {
         (self.bg_inode_table_hi as u64) << 32 | self.bg_inode_table_lo as u64
     }
 }
 
-// Represents the disk layout of an ext4 inode
+// 表示 ext4 inode 的磁盘布局
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4Inode {
@@ -172,25 +172,25 @@ pub struct Ext4Inode {
 }
 
 impl Ext4Inode {
-    // Get the full size of a file
+    // 获取文件的完整大小
     pub fn i_size(&self) -> u64 {
         (self.i_size_hi as u64) << 32 | self.i_size_lo as u64
     }
-    // Get full user ID
+    // 获取完整的用户 ID
     pub fn i_uid(&self) -> u32 {
         (self.i_uid_hi as u32) << 16 | self.i_uid_lo as u32
     }
-    // Get the full group ID
+    // 获取完整的组 ID
     pub fn i_gid(&self) -> u32 {
         (self.i_gid_hi as u32) << 16 | self.i_gid_lo as u32
     }
-    // Get the block address of an extended attribute (xattr)
+    // 获取 xattr 所在的块地址
     pub fn i_file_acl(&self) -> u64 {
         (self.i_file_acl_hi as u64) << 32 | self.i_file_acl_lo as u64
     }
 }
 
-// Represents the disk layout of the ext4 superblock
+// 表示 ext4 superblock 的磁盘布局
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 #[allow(dead_code)]
@@ -290,24 +290,24 @@ pub struct Ext4Superblock {
 
 #[allow(dead_code)]
 impl Ext4Superblock {
-    // Get the total number of blocks in the file system
+    // 获取文件系统的总块数
     pub fn s_blocks_count(&self) -> u64 {
         (self.s_blocks_count_hi as u64) << 32 | self.s_blocks_count_lo as u64
     }
 }
 
-// Minimum size of block group descriptor in 32-bit file system
+// 32 位文件系统中 group descriptor 的最小尺寸
 pub const EXT2_MIN_DESC_SIZE: u16 = 32;
-// Minimum size of block group descriptor in 64-bit file system
+// 64 位文件系统中 group descriptor 的最小尺寸
 pub const EXT2_MIN_DESC_SIZE_64BIT: u16 = 64;
 
-// Incompatibility flag indicating that the file system supports 64-bit features
+// incompat 标志, 表示文件系统支持 64 位特性
 pub const INCOMPAT_64BIT: u32 = 0x80;
 
-// Standard size for legacy inodes
+// 传统 inode 的标准尺寸
 pub const EXT2_GOOD_OLD_INODE_SIZE: u16 = 128;
 
-// Represents an extended attribute (xattr) entry
+// 表示一个 xattr entry
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4XattrEntry {
@@ -320,7 +320,7 @@ pub struct Ext4XattrEntry {
 }
 
 impl Ext4XattrEntry {
-    // Get the prefix of an extended attribute based on the name index
+    // 根据 name index 获取 xattr 的名称前缀
     pub fn get_name_prefix(&self) -> &'static str {
         match self.e_name_index {
             1 => "user.",
@@ -333,13 +333,13 @@ impl Ext4XattrEntry {
         }
     }
 
-    // Calculate the total size of the entry
+    // 计算该 entry 的总尺寸
     pub fn size(&self) -> usize {
         (std::mem::size_of::<Self>() + self.e_name_len as usize + 3) & !3
     }
 }
 
-// Header representing extended attributes (xattr) stored in external blocks
+// 表示存放在外部块中的 xattr header
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4XattrHeader {
@@ -351,14 +351,14 @@ pub struct Ext4XattrHeader {
     pub h_reserved: [u32; 3],
 }
 
-// Header representing extended attributes (xattr) stored in the inode body
+// 表示存放在 inode body 中的 xattr header
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4XattrIbodyHeader {
     pub h_magic: u32,
 }
 
-// ext4 file type constants defined
+// ext4 文件类型常量定义
 #[allow(dead_code)]
 pub mod file_type {
     pub const UNKNOWN: u8 = 0x0;
@@ -372,7 +372,7 @@ pub mod file_type {
     pub const CHECKSUM: u8 = 0xDE;
 }
 
-// Defines constants related to file types in inode mode
+// inode mode 中与文件类型相关的常量定义
 pub mod inode_mode {
     pub const S_IFLNK: u16 = 0xA000;
     pub const S_IFREG: u16 = 0x8000;
@@ -382,7 +382,7 @@ pub mod inode_mode {
     pub const EXT4_EXTENTS_FL: u32 = 0x80000;
 }
 
-// Represents a block group descriptor for a 32-bit file system
+// 表示 32 位文件系统的 group descriptor
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct Ext4GroupDescriptor32 {
@@ -400,7 +400,7 @@ pub struct Ext4GroupDescriptor32 {
     pub bg_checksum: u16,
 }
 
-// Implements conversion from 32-bit block group descriptors to 64-bit descriptors
+// 实现 32 位 group descriptor 到 64 位 group descriptor 的转换
 impl From<Ext4GroupDescriptor32> for Ext4GroupDescriptor {
     fn from(gd32: Ext4GroupDescriptor32) -> Self {
         Ext4GroupDescriptor {
@@ -431,7 +431,7 @@ impl From<Ext4GroupDescriptor32> for Ext4GroupDescriptor {
     }
 }
 
-// Structure that defines the security.capability extension property
+// 定义 security.capability 扩展属性的结构
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct VfsCapData {
@@ -439,7 +439,7 @@ pub struct VfsCapData {
     pub data: [CapData; 2],
 }
 
-// Defines the specific content of capability data
+// 定义 capability 数据的具体内容
 #[repr(C, packed)]
 #[derive(FromZeros, IntoBytes, Immutable, KnownLayout, Debug, Clone, Copy)]
 pub struct CapData {
@@ -448,12 +448,12 @@ pub struct CapData {
 }
 
 impl VfsCapData {
-    // Parse VfsCapData from raw byte data
+    // 从原始字节数据解析 VfsCapData
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
         Self::try_read_from_bytes(bytes).ok()
     }
 
-    // Get valid capabilities
+    // 获取有效的 capability 集合
     pub fn effective(&self) -> u64 {
         let magic = self.magic_etc;
         let version = magic & 0xFF000000;

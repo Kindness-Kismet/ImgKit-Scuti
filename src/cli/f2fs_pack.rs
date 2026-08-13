@@ -1,10 +1,10 @@
-// F2FS image pack command.
-// Packs a directory into an F2FS filesystem image.
+// F2FS 镜像打包命令
+// 将目录打包为 F2FS 文件系统镜像
 
 use anyhow::Result;
 use std::path::PathBuf;
 
-// Pack an F2FS image
+// 打包 F2FS 镜像
 #[allow(clippy::too_many_arguments)]
 pub fn run_f2fs_pack(
     source: &str,
@@ -28,7 +28,7 @@ pub fn run_f2fs_pack(
     use crate::filesystem::f2fs::types::{F2fsBuilderConfig, F2fsFeatures};
     use crate::filesystem::f2fs::write::F2fsBuilder;
 
-    // Parse image size
+    // 解析镜像大小
     let image_size = super::parse_size(size)?;
 
     log::info!("source: {}", source);
@@ -39,8 +39,8 @@ pub fn run_f2fs_pack(
         image_size as f64 / 1024.0 / 1024.0
     );
 
-    // Build feature flags.
-    // inode_chksum and sb_chksum are disabled until basic functionality is verified.
+    // 构建特性标志
+    // 在基础功能验证通过前, 禁用 inode_chksum 与 sb_chksum
     let features = F2fsFeatures {
         readonly,
         project_quota,
@@ -52,7 +52,7 @@ pub fn run_f2fs_pack(
         ..Default::default()
     };
 
-    // Build config
+    // 构建配置
     let config = F2fsBuilderConfig {
         source_dir: PathBuf::from(source),
         output_path: PathBuf::from(output),
@@ -69,12 +69,12 @@ pub fn run_f2fs_pack(
         timestamp,
     };
 
-    // Create builder and build
+    // 创建构建器并执行构建
     let mut builder = F2fsBuilder::new(config)?;
     builder.build()?;
 
-    // Builder only emits raw image; convert to sparse here as a post-processing step.
-    // On failure, keep the raw temp so the user does not lose the freshly built image.
+    // 构建器仅输出 raw 镜像, 此处作为后处理步骤转换为 sparse
+    // 转换失败时保留 raw 临时文件, 避免丢失刚构建好的镜像
     if sparse {
         let raw_tmp = format!("{}.raw.{}.tmp", output, std::process::id());
         std::fs::rename(output, &raw_tmp)?;

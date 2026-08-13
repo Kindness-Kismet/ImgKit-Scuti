@@ -1,31 +1,31 @@
-// EXT4 Inode allocator
+// EXT4 inode 分配器
 
 use std::collections::HashSet;
 
-// Reserved inode number
+// 保留的 inode 号
 pub const EXT4_ROOT_INO: u32 = 2;
 pub const EXT4_FIRST_INO: u32 = 11;
 
-// Inode allocator
+// inode 分配器
 pub struct InodeAllocator {
-    // Total number of inodes
+    // inode 总数
     total_inodes: u32,
-    // Number of inodes per group
+    // 每个 block group 的 inode 数
     inodes_per_group: u32,
-    // next available inode
+    // 下一个可用的 inode
     next_inode: u32,
-    // allocated inode
+    // 已分配的 inode
     allocated_inodes: HashSet<u32>,
-    // bitmap for each block group
+    // 每个 block group 的 bitmap
     bitmaps: Vec<Vec<u8>>,
 }
 
 impl InodeAllocator {
-    // Create new inode allocator
+    // 创建新的 inode 分配器
     pub fn new(total_inodes: u32, inodes_per_group: u32) -> Self {
         let group_count = total_inodes.div_ceil(inodes_per_group);
 
-        // Initialize bitmap for each block group
+        // 初始化每个 block group 的 bitmap
         let bitmap_size = (inodes_per_group as usize).div_ceil(8);
         let bitmaps = vec![vec![0u8; bitmap_size]; group_count as usize];
 
@@ -37,7 +37,7 @@ impl InodeAllocator {
             bitmaps,
         };
 
-        // Reserve first 11 inodes
+        // 预留前 11 个 inode
         for i in 1..EXT4_FIRST_INO {
             allocator.allocated_inodes.insert(i);
             allocator.mark_inode_used(i);
@@ -46,7 +46,7 @@ impl InodeAllocator {
         allocator
     }
 
-    // allocate an inode
+    // 分配一个 inode
     pub fn alloc_inode(&mut self) -> Option<u32> {
         if self.next_inode > self.total_inodes {
             return None;
@@ -59,14 +59,14 @@ impl InodeAllocator {
         Some(ino)
     }
 
-    // Allocate root inode
+    // 分配根目录 inode
     pub fn alloc_root_inode(&mut self) -> u32 {
         self.allocated_inodes.insert(EXT4_ROOT_INO);
         self.mark_inode_used(EXT4_ROOT_INO);
         EXT4_ROOT_INO
     }
 
-    // Mark inode as used
+    // 将 inode 标记为已使用
     fn mark_inode_used(&mut self, ino: u32) {
         let group_idx = ((ino - 1) / self.inodes_per_group) as usize;
         let inode_in_group = ((ino - 1) % self.inodes_per_group) as usize;
@@ -78,22 +78,22 @@ impl InodeAllocator {
         }
     }
 
-    // Get the bitmap of the block group
+    // 获取指定 block group 的 bitmap
     pub fn get_bitmap(&self, group_idx: u32) -> &[u8] {
         &self.bitmaps[group_idx as usize]
     }
 
-    // Get the number of allocated inodes
+    // 获取已分配的 inode 数
     pub fn allocated_count(&self) -> u32 {
         self.allocated_inodes.len() as u32
     }
 
-    // Get the number of free inodes
+    // 获取空闲 inode 数
     pub fn free_count(&self) -> u32 {
         self.total_inodes - self.allocated_count()
     }
 
-    // Get the number of free inodes in the block group
+    // 获取指定 block group 中的空闲 inode 数
     pub fn get_free_inodes_in_group(&self, group_idx: u32) -> u32 {
         let group_start = group_idx * self.inodes_per_group + 1;
         let group_end = group_start + self.inodes_per_group;
@@ -111,12 +111,12 @@ impl InodeAllocator {
         free_count
     }
 
-    // Calculate the block group where the inode is located
+    // 计算 inode 所在的 block group
     pub fn inode_group(&self, ino: u32) -> u32 {
         (ino - 1) / self.inodes_per_group
     }
 
-    // Calculate the index of the inode within the block group
+    // 计算 inode 在 block group 内的索引
     pub fn inode_index_in_group(&self, ino: u32) -> u32 {
         (ino - 1) % self.inodes_per_group
     }

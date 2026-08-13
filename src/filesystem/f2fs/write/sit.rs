@@ -1,27 +1,27 @@
-// F2FS SIT (Segment Information Table) Manager
+// F2FS SIT (segment info table) 管理器
 use crate::filesystem::f2fs::consts::*;
 //
-// Responsible for managing the segment information table and tracking the number and type of valid blocks for each segment.
+// 负责管理 segment info table, 跟踪每个 segment 的 valid block count 与类型.
 
 use crate::filesystem::f2fs::types::*;
 use crate::filesystem::f2fs::{F2fsError, Result};
 use std::io::Write;
 
-// SIT Manager
+// SIT 管理器
 #[derive(Debug)]
 pub struct SitManager {
-    // SIT entry list
+    // SIT 条目列表
     entries: Vec<SitEntry>,
-    // SIT area starting block address
+    // SIT 区域起始块地址
     sit_blkaddr: u32,
-    // Number of blocks per segment
+    // 每个 segment 的块数量
     blocks_per_seg: u32,
-    // Main area starting block address
+    // main 区域起始块地址
     main_blkaddr: u32,
 }
 
 impl SitManager {
-    // Create a new SIT manager
+    // 创建新的 SIT 管理器
     pub fn new(segment_count: u32, sit_blkaddr: u32, main_blkaddr: u32) -> Self {
         let mut entries = Vec::with_capacity(segment_count as usize);
         for _ in 0..segment_count {
@@ -36,7 +36,7 @@ impl SitManager {
         }
     }
 
-    // Get segment number
+    // 获取段号
     fn get_segno(&self, blkaddr: u32) -> Option<u32> {
         if blkaddr < self.main_blkaddr {
             return None;
@@ -44,20 +44,20 @@ impl SitManager {
         Some((blkaddr - self.main_blkaddr) / self.blocks_per_seg)
     }
 
-    // Get the offset of the block within the segment
+    // 获取块在 segment 内的偏移
     fn get_blkoff(&self, blkaddr: u32) -> u32 {
         (blkaddr - self.main_blkaddr) % self.blocks_per_seg
     }
 
-    // Mark block as used
+    // 将块标记为已使用
     pub fn mark_block_used(&mut self, blkaddr: u32, seg_type: u16) -> Result<()> {
         let segno = self
             .get_segno(blkaddr)
-            .ok_or_else(|| F2fsError::InvalidData(format!("无效的块地址: {}", blkaddr)))?;
+            .ok_or_else(|| F2fsError::InvalidData(format!("invalid blkaddr: {}", blkaddr)))?;
 
         if segno as usize >= self.entries.len() {
             return Err(F2fsError::InvalidData(format!(
-                "段号超出范围: {} >= {}",
+                "segment number out of range: {} >= {}",
                 segno,
                 self.entries.len()
             )));
@@ -66,17 +66,17 @@ impl SitManager {
         let blkoff = self.get_blkoff(blkaddr) as usize;
         let entry = &mut self.entries[segno as usize];
 
-        // Mark block as valid
+        // 将块标记为有效
         entry.mark_block_valid(blkoff);
 
-        // Update valid block number and segment type
+        // 更新 valid block count 与 segment 类型
         let valid_blocks = entry.valid_blocks() + 1;
         entry.set_vblocks(valid_blocks, seg_type);
 
         Ok(())
     }
 
-    // Batch mark blocks as used
+    // 批量将块标记为已使用
     pub fn mark_blocks_used(
         &mut self,
         start_blkaddr: u32,
@@ -89,11 +89,11 @@ impl SitManager {
         Ok(())
     }
 
-    // Set segment type
+    // 设置 segment 类型
     pub fn set_seg_type(&mut self, segno: u32, seg_type: u16) -> Result<()> {
         if segno as usize >= self.entries.len() {
             return Err(F2fsError::InvalidData(format!(
-                "段号超出范围: {} >= {}",
+                "segment number out of range: {} >= {}",
                 segno,
                 self.entries.len()
             )));
@@ -105,11 +105,11 @@ impl SitManager {
         Ok(())
     }
 
-    // Set the modification time of the segment
+    // 设置 segment 的修改时间
     pub fn set_mtime(&mut self, segno: u32, mtime: u64) -> Result<()> {
         if segno as usize >= self.entries.len() {
             return Err(F2fsError::InvalidData(format!(
-                "段号超出范围: {} >= {}",
+                "segment number out of range: {} >= {}",
                 segno,
                 self.entries.len()
             )));
@@ -119,38 +119,38 @@ impl SitManager {
         Ok(())
     }
 
-    // Get the effective block number of a segment
+    // 获取 segment 的 valid block count
     pub fn get_valid_blocks(&self, segno: u32) -> Option<u16> {
         self.entries.get(segno as usize).map(|e| e.valid_blocks())
     }
 
-    // Get segment type
+    // 获取 segment 类型
     pub fn get_seg_type(&self, segno: u32) -> Option<u16> {
         self.entries.get(segno as usize).map(|e| e.seg_type())
     }
 
-    // Get SIT entry
+    // 获取 SIT 条目
     pub fn get_entry(&self, segno: u32) -> Option<&SitEntry> {
         self.entries.get(segno as usize)
     }
 
-    // Get the total number of segments
+    // 获取 segment 总数
     pub fn segment_count(&self) -> u32 {
         self.entries.len() as u32
     }
 
-    // Get the SIT area starting block address
+    // 获取 SIT 区域起始块地址
     pub fn sit_blkaddr(&self) -> u32 {
         self.sit_blkaddr
     }
 
-    // Calculate the number of blocks required for the SIT area
+    // 计算 SIT 区域所需的块数量
     pub fn sit_blocks_needed(&self) -> u32 {
         let entries_per_block = F2FS_BLKSIZE / SIT_ENTRY_SIZE;
         (self.entries.len() as u32).div_ceil(entries_per_block as u32)
     }
 
-    // Serialize SIT region to writer
+    // 将 SIT 区域序列化到 writer
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
         let entries_per_block = F2FS_BLKSIZE / SIT_ENTRY_SIZE;
         let mut block_buf = vec![0u8; F2FS_BLKSIZE];
@@ -162,7 +162,7 @@ impl SitManager {
             let offset = entry_idx * SIT_ENTRY_SIZE;
             block_buf[offset..offset + SIT_ENTRY_SIZE].copy_from_slice(&entry_bytes);
 
-            // Write to block when block is full or last entry
+            // 块填满或写到最后一个条目时落盘
             if entry_idx == entries_per_block - 1 || i == self.entries.len() - 1 {
                 writer.write_all(&block_buf)?;
                 block_buf.fill(0);
@@ -172,7 +172,7 @@ impl SitManager {
         Ok(())
     }
 
-    // Generate byte data of SIT area
+    // 生成 SIT 区域的字节数据
     pub fn to_bytes(&self) -> Vec<u8> {
         let entries_per_block = F2FS_BLKSIZE / SIT_ENTRY_SIZE;
         let blocks_needed = self.sit_blocks_needed() as usize;
@@ -190,15 +190,15 @@ impl SitManager {
         data
     }
 
-    // Generate SIT bitmap (for checkpointing)
+    // 生成 SIT bitmap (供 checkpoint 使用)
     pub fn generate_bitmap(&self) -> Vec<u8> {
-        // SIT bitmap marks which SIT blocks are valid
-        // Each bit corresponds to a SIT block
+        // SIT bitmap 标记哪些 SIT 块有效
+        // 每个 bit 对应一个 SIT 块
         let blocks_needed = self.sit_blocks_needed();
         let bitmap_size = (blocks_needed as usize).div_ceil(8);
         let mut bitmap = vec![0u8; bitmap_size];
 
-        // Mark all used SIT blocks
+        // 标记所有已使用的 SIT 块
         for i in 0..blocks_needed {
             let byte_idx = i as usize / 8;
             let bit_idx = i as usize % 8;
@@ -224,11 +224,11 @@ mod tests {
     fn test_mark_block_used() {
         let mut manager = SitManager::new(10, 1024, 2048);
 
-        // Mark the first block of the first segment
+        // 标记第一个 segment 的第一个块
         manager.mark_block_used(2048, 0).unwrap();
         assert_eq!(manager.get_valid_blocks(0), Some(1));
 
-        // Mark the second block of the first segment
+        // 标记第一个 segment 的第二个块
         manager.mark_block_used(2049, 0).unwrap();
         assert_eq!(manager.get_valid_blocks(0), Some(2));
     }
@@ -237,14 +237,14 @@ mod tests {
     fn test_sit_entry_serialization() {
         let mut manager = SitManager::new(10, 1024, 2048);
 
-        // mark some blocks
+        // 标记若干块
         manager.mark_block_used(2048, 1).unwrap();
         manager.mark_block_used(2049, 1).unwrap();
 
         let data = manager.to_bytes();
         assert!(!data.is_empty());
 
-        // Verify first entry
+        // 校验第一个条目
         let entry = SitEntry::from_bytes(&data[..SIT_ENTRY_SIZE]).unwrap();
         assert_eq!(entry.valid_blocks(), 2);
         assert_eq!(entry.seg_type(), 1);

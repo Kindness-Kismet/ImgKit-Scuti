@@ -1,4 +1,4 @@
-// SELinux config file writer
+// SELinux 配置文件写入
 
 use std::fs::File;
 use std::io::Write;
@@ -12,7 +12,7 @@ fn format_mode(mode: u16) -> String {
     }
 }
 
-// Write filesystem config to a file
+// 将文件系统配置写入文件
 pub fn write_fs_config(
     path: &Path,
     prefix: &str,
@@ -63,7 +63,7 @@ pub fn write_fs_config(
     Ok(())
 }
 
-// Write file contexts to a file
+// 将 file_contexts 写入文件
 pub fn write_file_contexts(
     path: &Path,
     prefix: &str,

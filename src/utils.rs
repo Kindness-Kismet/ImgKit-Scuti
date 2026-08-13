@@ -1,4 +1,4 @@
-// General utility module
+// 通用工具模块
 
 pub mod detect;
 pub mod logger;
@@ -7,7 +7,7 @@ pub mod progress;
 pub mod selinux;
 pub mod symlink;
 
-// Re-export commonly used functions
+// 重新导出常用函数
 pub use detect::detect_filesystem;
 pub use path::{
     check_windows_case_conflict, is_case_sensitive_directory, join_output_path,

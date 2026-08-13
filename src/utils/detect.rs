@@ -1,4 +1,4 @@
-// Filesystem detection module
+// 文件系统检测模块
 
 use crate::container::sparse::{
     CHUNK_HEADER_SIZE, CHUNK_TYPE_DONT_CARE, CHUNK_TYPE_FILL, CHUNK_TYPE_RAW, SPARSE_HEADER_SIZE,
@@ -8,27 +8,27 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
-// Magic bytes entry
+// magic bytes 条目
 struct MagicBytes {
     offset: usize,
     expected: &'static [u8],
     file_type: &'static str,
 }
 
-// Magic bytes lookup table
+// magic bytes 查找表
 const MAGIC_BYTES: &[MagicBytes] = &[
     MagicBytes {
         offset: 0,
         expected: b"CrAU",
         file_type: "payload",
     },
-    // Sparse image (checked first, may be a sparse super)
+    // sparse 镜像 (优先检测, 可能是 sparse super)
     MagicBytes {
         offset: 0,
         expected: &[0x3a, 0xff, 0x26, 0xed],
         file_type: "sparse",
     },
-    // Super partition (two possible offsets)
+    // super 分区 (两个可能的偏移)
     MagicBytes {
         offset: 0,
         expected: &[0x67, 0x44, 0x6c, 0x61],
@@ -39,19 +39,19 @@ const MAGIC_BYTES: &[MagicBytes] = &[
         expected: &[0x67, 0x44, 0x6c, 0x61],
         file_type: "super",
     },
-    // EROFS
+    // EROFS 超级块
     MagicBytes {
         offset: 1024,
         expected: &[0xe2, 0xe1, 0xf5, 0xe0],
         file_type: "erofs",
     },
-    // F2FS
+    // F2FS 超级块
     MagicBytes {
         offset: 1024,
         expected: &[0x10, 0x20, 0xf5, 0xf2],
         file_type: "f2fs",
     },
-    // EXT4
+    // EXT4 超级块
     MagicBytes {
         offset: 1080,
         expected: &[0x53, 0xef],
@@ -59,24 +59,24 @@ const MAGIC_BYTES: &[MagicBytes] = &[
     },
 ];
 
-// Detect the filesystem type of a file
+// 检测文件的文件系统类型
 pub fn detect_filesystem(path: &Path) -> Result<String> {
     let mut file = File::open(path)?;
 
-    // Read the first 5 KB to cover all magic byte offsets
+    // 读取前 5 KB 以覆盖所有 magic bytes 偏移
     let mut buffer = vec![0u8; 5000];
     let read_len = file.read(&mut buffer)?;
     buffer.truncate(read_len);
 
-    // Check for sparse image first
+    // 优先检测 sparse 镜像
     let is_sparse = buffer.len() >= 4 && buffer[0..4] == [0x3a, 0xff, 0x26, 0xed];
 
-    // If sparse, read the virtualized data to detect the real filesystem type
+    // 若为 sparse, 读取虚拟化数据以检测真实文件系统类型
     if is_sparse {
         return detect_sparse_filesystem(&mut file);
     }
 
-    // Walk the magic bytes table
+    // 遍历 magic bytes 表
     for m in MAGIC_BYTES {
         if m.offset + m.expected.len() <= buffer.len()
             && buffer[m.offset..m.offset + m.expected.len()] == *m.expected
@@ -88,13 +88,13 @@ pub fn detect_filesystem(path: &Path) -> Result<String> {
     Err(anyhow!("unrecognized filesystem type"))
 }
 
-// Sparse header fields
+// sparse 头部字段
 struct SparseHeader {
     blk_sz: u32,
     total_chunks: u32,
 }
 
-// Read and parse the sparse image header
+// 读取并解析 sparse 镜像头部
 fn read_sparse_header(file: &mut File) -> Result<SparseHeader> {
     file.seek(SeekFrom::Start(0))?;
     let mut header = [0u8; SPARSE_HEADER_SIZE];
@@ -104,7 +104,7 @@ fn read_sparse_header(file: &mut File) -> Result<SparseHeader> {
     let total_chunks = u32::from_le_bytes([header[20], header[21], header[22], header[23]]);
 
     if blk_sz == 0 {
-        return Err(anyhow!("sparse 块大小为 0"));
+        return Err(anyhow!("sparse block size is 0"));
     }
     if total_chunks == 0 {
         return Err(anyhow!("sparse image has no valid chunks"));
@@ -116,14 +116,14 @@ fn read_sparse_header(file: &mut File) -> Result<SparseHeader> {
     })
 }
 
-// Chunk header fields
+// chunk 头部字段
 struct ChunkInfo {
     chunk_type: u16,
     chunk_sz: u32,
     total_sz: u32,
 }
 
-// Read a chunk header
+// 读取 chunk 头部
 fn read_chunk_header(file: &mut File) -> Result<ChunkInfo> {
     let mut chunk_header = [0u8; 12];
     file.read_exact(&mut chunk_header)?;
@@ -145,7 +145,7 @@ fn read_chunk_header(file: &mut File) -> Result<ChunkInfo> {
     })
 }
 
-// Detect the filesystem type inside a sparse image
+// 检测 sparse 镜像内部的文件系统类型
 fn detect_sparse_filesystem(file: &mut File) -> Result<String> {
     if is_sparse_super(file)? {
         return Ok("sparse_super".to_string());
@@ -153,7 +153,7 @@ fn detect_sparse_filesystem(file: &mut File) -> Result<String> {
 
     let header = read_sparse_header(file)?;
 
-    // Read the first valid data chunk to detect the ext4 magic number
+    // 读取第一个有效数据 chunk 以检测 ext4 magic bytes
     let mut virtual_data = vec![0u8; 2048.min(header.blk_sz as usize)];
     let mut data_read = 0usize;
 
@@ -164,12 +164,12 @@ fn detect_sparse_filesystem(file: &mut File) -> Result<String> {
         };
         let chunk_output_size = (chunk.chunk_sz as u64)
             .checked_mul(header.blk_sz as u64)
-            .ok_or_else(|| anyhow!("sparse chunk 输出大小溢出"))?;
+            .ok_or_else(|| anyhow!("sparse chunk output size overflow"))?;
         let chunk_data_size = chunk
             .total_sz
             .checked_sub(CHUNK_HEADER_SIZE)
             .map(u64::from)
-            .ok_or_else(|| anyhow!("sparse chunk total_sz 小于头部大小"))?;
+            .ok_or_else(|| anyhow!("sparse chunk total_sz is smaller than header size"))?;
 
         match chunk.chunk_type {
             CHUNK_TYPE_RAW => {
@@ -184,7 +184,7 @@ fn detect_sparse_filesystem(file: &mut File) -> Result<String> {
                     }
                 }
                 if chunk_data_size < to_read as u64 {
-                    return Err(anyhow!("RAW chunk 数据长度不足"));
+                    return Err(anyhow!("RAW chunk data is truncated"));
                 }
                 let remaining = chunk_data_size - to_read as u64;
                 if remaining > 0 {
@@ -225,7 +225,7 @@ fn detect_sparse_filesystem(file: &mut File) -> Result<String> {
         return Ok("sparse_ext4".to_string());
     }
 
-    // F2FS superblock magic at virtual offset 1024
+    // F2FS superblock magic bytes 位于虚拟偏移 1024
     if virtual_data.len() >= 1028 && virtual_data[1024..1028] == [0x10, 0x20, 0xf5, 0xf2] {
         return Ok("sparse_f2fs".to_string());
     }
@@ -233,7 +233,7 @@ fn detect_sparse_filesystem(file: &mut File) -> Result<String> {
     Err(anyhow!("unrecognized filesystem type in sparse image"))
 }
 
-// Check whether a sparse image contains a super partition
+// 检测 sparse 镜像是否包含 super 分区
 fn is_sparse_super(file: &mut File) -> Result<bool> {
     let header = read_sparse_header(file)?;
 
@@ -244,12 +244,12 @@ fn is_sparse_super(file: &mut File) -> Result<bool> {
         };
         let chunk_output_size = (chunk.chunk_sz as u64)
             .checked_mul(header.blk_sz as u64)
-            .ok_or_else(|| anyhow!("sparse chunk 输出大小溢出"))?;
+            .ok_or_else(|| anyhow!("sparse chunk output size overflow"))?;
         let chunk_data_size = chunk
             .total_sz
             .checked_sub(CHUNK_HEADER_SIZE)
             .map(u64::from)
-            .ok_or_else(|| anyhow!("sparse chunk total_sz 小于头部大小"))?;
+            .ok_or_else(|| anyhow!("sparse chunk total_sz is smaller than header size"))?;
 
         match chunk.chunk_type {
             CHUNK_TYPE_RAW => {
@@ -265,7 +265,7 @@ fn is_sparse_super(file: &mut File) -> Result<bool> {
                 }
 
                 if chunk_data_size < to_read as u64 {
-                    return Err(anyhow!("RAW chunk 数据长度不足"));
+                    return Err(anyhow!("RAW chunk data is truncated"));
                 }
                 let remaining = chunk_data_size - to_read as u64;
                 if remaining > 0 {

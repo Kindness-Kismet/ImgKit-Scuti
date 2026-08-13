@@ -1,31 +1,31 @@
-// EROFS file system module
+// EROFS 文件系统模块
 
-// constant definition
+// 常量定义
 pub mod consts;
 
-// type definition
+// 类型定义
 pub mod error;
 pub mod types;
 
-// Read function
+// 读取功能
 pub mod read;
 
-// write function
+// 写入功能
 pub mod write;
 
-// Re-export common types
+// 重导出常用类型
 
-// constant
+// 常量
 pub use consts::*;
 
-// Error type
+// 错误类型
 pub use error::{ErofsError, Result};
 
-// type definition
+// 类型定义
 pub use types::*;
 
-// Read function
+// 读取功能
 pub use read::ErofsVolume;
 
-// write function
+// 写入功能
 pub use write::{ErofsConfig, build_erofs_image};

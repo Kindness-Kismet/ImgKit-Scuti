@@ -1,6 +1,6 @@
-// EROFS write module
+// EROFS 写入模块
 //
-// Provides writing capabilities required for EROFS image building
+// 提供构建 EROFS 镜像所需的写入能力
 
 mod builder;
 mod compress;

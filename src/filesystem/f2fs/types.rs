@@ -1,4 +1,4 @@
-// F2FS type definition
+// F2FS 类型定义
 
 use super::consts::*;
 use crate::filesystem::f2fs::{F2fsError, Result};
@@ -6,7 +6,7 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::Cursor;
 use std::path::PathBuf;
 
-// Type packaging
+// 类型封装
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Nid(pub u32);
 
@@ -37,7 +37,7 @@ impl From<Block> for u32 {
     }
 }
 
-// Block address enumeration
+// block 地址枚举
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockAddr {
     Null,
@@ -57,7 +57,7 @@ impl From<u32> for BlockAddr {
     }
 }
 
-// super block
+// superblock 结构
 #[derive(Debug)]
 pub struct Superblock {
     pub magic: u32,
@@ -75,7 +75,7 @@ impl Superblock {
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         let mut cursor = Cursor::new(data);
 
-        // offset 0
+        // 偏移 0
         let magic = cursor.read_u32::<LittleEndian>()?;
         if magic != F2FS_MAGIC {
             return Err(F2fsError::InvalidMagic {
@@ -84,22 +84,22 @@ impl Superblock {
             });
         }
 
-        // offset 4-7: major_ver, minor_ver
+        // 偏移 4-7: major_ver, minor_ver
         let _major_ver = cursor.read_u16::<LittleEndian>()?;
         let _minor_ver = cursor.read_u16::<LittleEndian>()?;
 
-        // offset 8-35: log_sectorsize through checksum_offset
+        // 偏移 8-35: log_sectorsize 到 checksum_offset
         cursor.set_position(36);
         let block_count = cursor.read_u64::<LittleEndian>()?;
 
-        // offset 44-47: section_count
+        // 偏移 44-47: section_count
         cursor.set_position(44);
         let _section_count = cursor.read_u32::<LittleEndian>()?;
 
-        // offset 48
+        // 偏移 48
         let segment_count = cursor.read_u32::<LittleEndian>()?;
 
-        // Skip to block addresses (offset 72+)
+        // 跳转到 block 地址区 (偏移 72 起)
         cursor.set_position(72);
         let segment0_blkaddr = cursor.read_u32::<LittleEndian>()?;
         let cp_blkaddr = cursor.read_u32::<LittleEndian>()?;
@@ -122,7 +122,7 @@ impl Superblock {
     }
 }
 
-// Inode
+// inode 结构
 #[derive(Debug, Clone)]
 pub struct Inode {
     pub mode: u16,
@@ -140,35 +140,35 @@ impl Inode {
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         let mut cursor = Cursor::new(data);
 
-        // offset 0: mode
+        // 偏移 0: mode
         let mode = cursor.read_u16::<LittleEndian>()?;
 
-        // offset 3: inline flags
+        // 偏移 3: inline 标志
         cursor.set_position(3);
         let inline = cursor.read_u8()?;
 
-        // offset 4: uid
+        // 偏移 4: uid
         let uid = cursor.read_u32::<LittleEndian>()?;
 
-        // offset 8: gid
+        // 偏移 8: gid
         let gid = cursor.read_u32::<LittleEndian>()?;
 
-        // offset 16: size
+        // 偏移 16: size
         cursor.set_position(16);
         let size = cursor.read_u64::<LittleEndian>()?;
 
-        // offset 24: blocks
+        // 偏移 24: blocks
         let blocks = cursor.read_u64::<LittleEndian>()?;
 
-        // offset 76: xattr_nid
+        // 偏移 76: xattr_nid
         cursor.set_position(76);
         let xattr_nid = cursor.read_u32::<LittleEndian>()?;
 
-        // offset 116: flags
+        // 偏移 116: flags
         cursor.set_position(116);
         let flags = cursor.read_u32::<LittleEndian>()?;
 
-        // offset 360: extra_isize (in extra attr area)
+        // 偏移 360: extra_isize (位于额外属性区)
         cursor.set_position(360);
         let extra_isize = cursor.read_u16::<LittleEndian>()?;
 
@@ -198,7 +198,7 @@ impl Inode {
     }
 }
 
-// XATTR entry header
+// XATTR 条目头
 #[derive(Debug, Clone)]
 pub struct XattrEntry {
     pub name_index: u8,
@@ -211,7 +211,7 @@ pub struct XattrEntry {
 impl XattrEntry {
     pub fn from_bytes(data: &[u8]) -> anyhow::Result<(Self, usize)> {
         if data.len() < 4 {
-            return Err(anyhow::anyhow!("xattr entry 数据太短"));
+            return Err(anyhow::anyhow!("xattr entry data too short"));
         }
 
         let name_index = data[0];
@@ -222,22 +222,22 @@ impl XattrEntry {
         let name_end = name_start + name_len as usize;
 
         if data.len() < name_end {
-            return Err(anyhow::anyhow!("xattr name 数据不完整"));
+            return Err(anyhow::anyhow!("xattr name data is incomplete"));
         }
 
         let name = data[name_start..name_end].to_vec();
 
-        // F2FS xattr: value immediately follows name, not aligned
+        // F2FS xattr: value 紧跟在 name 之后, 不做对齐
         let value_start = name_end;
         let value_end = value_start + value_size as usize;
 
         if data.len() < value_end {
-            return Err(anyhow::anyhow!("xattr value 数据不完整"));
+            return Err(anyhow::anyhow!("xattr value data is incomplete"));
         }
 
         let value = data[value_start..value_end].to_vec();
 
-        // The entire entry is aligned to a 4-byte boundary
+        // 整个条目按 4 字节边界对齐
         let total_size = (value_end + 3) & !3;
 
         Ok((
@@ -252,7 +252,7 @@ impl XattrEntry {
         ))
     }
 
-    // Get the full xattr name (including prefix)
+    // 获取完整的 xattr 名称 (含前缀)
     pub fn full_name(&self) -> String {
         let prefix = match self.name_index {
             F2FS_XATTR_INDEX_USER => "user.",
@@ -273,7 +273,7 @@ impl XattrEntry {
     }
 }
 
-// NAT entry
+// NAT 条目
 #[derive(Debug, Clone, Default)]
 pub struct NatEntry {
     pub version: u8,
@@ -283,10 +283,10 @@ pub struct NatEntry {
 
 impl NatEntry {
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
-        // NAT entry structure (9 bytes):
-        // offset 0: version (1 byte)
-        // offset 1-4: ino (4 bytes)
-        // offset 5-8: block_addr (4 bytes)
+        // NAT 条目结构 (9 字节):
+        // 偏移 0: version (1 字节)
+        // 偏移 1-4: ino (4 字节)
+        // 偏移 5-8: block_addr (4 字节)
         let mut cursor = Cursor::new(data);
         let version = cursor.read_u8()?;
         let ino = cursor.read_u32::<LittleEndian>()?;
@@ -299,7 +299,7 @@ impl NatEntry {
         })
     }
 
-    // serialize to bytes
+    // 序列化为字节
     pub fn to_bytes(&self) -> [u8; NAT_ENTRY_SIZE] {
         let mut buf = [0u8; NAT_ENTRY_SIZE];
         buf[0] = self.version;
@@ -309,9 +309,9 @@ impl NatEntry {
     }
 }
 
-// ============ Builder related types ============
+// ============ 构建器相关类型 ============
 
-// Segment type
+// segment 类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(usize)]
 pub enum SegType {
@@ -336,7 +336,7 @@ impl SegType {
     }
 }
 
-// F2FS feature flags
+// F2FS 特性标志
 #[derive(Debug, Clone, Default)]
 pub struct F2fsFeatures {
     pub encrypt: bool,
@@ -356,7 +356,7 @@ pub struct F2fsFeatures {
 }
 
 impl F2fsFeatures {
-    // Convert to u32 flag
+    // 转换为 u32 标志位
     pub fn to_bits(&self) -> u32 {
         let mut bits = 0u32;
         if self.encrypt {
@@ -404,7 +404,7 @@ impl F2fsFeatures {
         bits
     }
 
-    // Parsed from u32 flag bit
+    // 从 u32 标志位解析
     pub fn from_bits(bits: u32) -> Self {
         F2fsFeatures {
             encrypt: bits & F2FS_FEATURE_ENCRYPT != 0,
@@ -424,7 +424,7 @@ impl F2fsFeatures {
         }
     }
 
-    // Android default features
+    // Android 默认特性组合
     pub fn android_default() -> Self {
         F2fsFeatures {
             encrypt: true,
@@ -439,7 +439,7 @@ impl F2fsFeatures {
         }
     }
 
-    // Android RO features
+    // Android 只读特性组合
     pub fn android_ro() -> Self {
         F2fsFeatures {
             readonly: true,
@@ -451,7 +451,7 @@ impl F2fsFeatures {
     }
 }
 
-// Compression configuration
+// 压缩配置
 #[derive(Debug, Clone)]
 pub struct CompressionConfig {
     pub algorithm: CompressionAlgorithm,
@@ -463,13 +463,13 @@ impl Default for CompressionConfig {
     fn default() -> Self {
         CompressionConfig {
             algorithm: CompressionAlgorithm::Lz4,
-            log_cluster_size: 2, // 4 blocks per cluster
+            log_cluster_size: 2, // 每个 cluster 4 个 block
             min_blocks: 1,
         }
     }
 }
 
-// Compression algorithm
+// 压缩算法
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CompressionAlgorithm {
     Lzo = 0,
@@ -478,7 +478,7 @@ pub enum CompressionAlgorithm {
     Zstd = 2,
 }
 
-// Builder configuration
+// 构建器配置
 #[derive(Debug, Clone)]
 pub struct F2fsBuilderConfig {
     pub source_dir: PathBuf,
@@ -516,7 +516,7 @@ impl Default for F2fsBuilderConfig {
     }
 }
 
-// SIT entry (Segment Information Table)
+// SIT 条目 (Segment Information Table)
 #[derive(Debug, Clone)]
 pub struct SitEntry {
     pub vblocks: u16, // [15:10] seg_type, [9:0] valid_blocks
@@ -535,32 +535,32 @@ impl Default for SitEntry {
 }
 
 impl SitEntry {
-    // Get the number of valid blocks
+    // 获取有效 block 数量
     pub fn valid_blocks(&self) -> u16 {
         self.vblocks & SIT_VBLOCKS_MASK
     }
 
-    // Get segment type
+    // 获取 segment 类型
     pub fn seg_type(&self) -> u16 {
         (self.vblocks & !SIT_VBLOCKS_MASK) >> SIT_VBLOCKS_SHIFT
     }
 
-    // Set the number of valid blocks and segment type
+    // 设置有效 block 数量与 segment 类型
     pub fn set_vblocks(&mut self, valid_blocks: u16, seg_type: u16) {
         self.vblocks = (seg_type << SIT_VBLOCKS_SHIFT) | (valid_blocks & SIT_VBLOCKS_MASK);
     }
 
-    // Mark block as used
-    // F2FS uses big-endian bit order: bit 7 = block 0, bit 6 = block 1, ..., bit 0 = block 7
+    // 标记 block 为已使用
+    // F2FS 采用大端位序: bit 7 = block 0, bit 6 = block 1, ..., bit 0 = block 7
     pub fn mark_block_valid(&mut self, offset: usize) {
         if offset < DEFAULT_BLOCKS_PER_SEGMENT as usize {
             let byte_idx = offset / 8;
-            let bit_idx = 7 - (offset % 8); // big endian
+            let bit_idx = 7 - (offset % 8); // 大端位序
             self.valid_map[byte_idx] |= 1 << bit_idx;
         }
     }
 
-    // serialize to bytes
+    // 序列化为字节
     pub fn to_bytes(&self) -> [u8; SIT_ENTRY_SIZE] {
         let mut buf = [0u8; SIT_ENTRY_SIZE];
         buf[0..2].copy_from_slice(&self.vblocks.to_le_bytes());
@@ -569,10 +569,10 @@ impl SitEntry {
         buf
     }
 
-    // parse from bytes
+    // 从字节解析
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         if data.len() < SIT_ENTRY_SIZE {
-            return Err(F2fsError::InvalidData("SIT entry 数据太短".into()));
+            return Err(F2fsError::InvalidData("SIT entry data too short".into()));
         }
         let vblocks = u16::from_le_bytes([data[0], data[1]]);
         let mut valid_map = [0u8; SIT_VBLOCK_MAP_SIZE];
@@ -588,7 +588,7 @@ impl SitEntry {
     }
 }
 
-// Summary entry
+// summary 条目
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Summary {
     pub nid: u32,
@@ -607,7 +607,7 @@ impl Summary {
 
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         if data.len() < SUMMARY_SIZE {
-            return Err(F2fsError::InvalidData("Summary 数据太短".into()));
+            return Err(F2fsError::InvalidData("summary data too short".into()));
         }
         Ok(Summary {
             nid: u32::from_le_bytes([data[0], data[1], data[2], data[3]]),
@@ -617,7 +617,7 @@ impl Summary {
     }
 }
 
-// node footer
+// node footer 结构
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NodeFooter {
     pub nid: u32,
@@ -640,7 +640,7 @@ impl NodeFooter {
 
     pub fn from_bytes(data: &[u8]) -> Result<Self> {
         if data.len() < NODE_FOOTER_SIZE {
-            return Err(F2fsError::InvalidData("NodeFooter 数据太短".into()));
+            return Err(F2fsError::InvalidData("node footer data too short".into()));
         }
         Ok(NodeFooter {
             nid: u32::from_le_bytes([data[0], data[1], data[2], data[3]]),
@@ -654,7 +654,7 @@ impl NodeFooter {
     }
 }
 
-// directory entry
+// 目录项
 #[derive(Debug, Clone)]
 pub struct DirEntryRaw {
     pub hash_code: u32,
@@ -674,7 +674,7 @@ impl DirEntryRaw {
     }
 }
 
-// File type
+// 文件类型
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
     Unknown = 0,
@@ -703,7 +703,7 @@ impl From<u8> for FileType {
 }
 
 impl From<u16> for FileType {
-    // Convert from mode
+    // 从 mode 转换
     fn from(mode: u16) -> Self {
         match mode & S_IFMT {
             S_IFREG => FileType::RegFile,
@@ -718,7 +718,7 @@ impl From<u16> for FileType {
     }
 }
 
-// Extended information
+// inode 额外属性信息
 #[derive(Debug, Clone, Default)]
 pub struct ExtraIsize {
     pub extra_isize: u16,

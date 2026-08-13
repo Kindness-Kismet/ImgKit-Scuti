@@ -1,9 +1,9 @@
-// ZSTD decompression implementation
+// zstd 解压缩实现
 
 use super::{CompressionError, Compressor, Decompressor, Result};
 use std::io::Read;
 
-// ZSTD decompressor
+// zstd 解压器
 pub struct ZstdDecompressor;
 
 impl Decompressor for ZstdDecompressor {
@@ -11,12 +11,12 @@ impl Decompressor for ZstdDecompressor {
         use ruzstd::decoding::StreamingDecoder;
 
         let mut decoder = StreamingDecoder::new(compressed)
-            .map_err(|e| CompressionError::new(format!("ZSTD 解压缩初始化失败: {}", e)))?;
+            .map_err(|e| CompressionError::new(format!("ZSTD decoder init failed: {}", e)))?;
 
         let mut output = Vec::with_capacity(decompressed_size);
         decoder
             .read_to_end(&mut output)
-            .map_err(|e| CompressionError::new(format!("ZSTD 解压缩失败: {}", e)))?;
+            .map_err(|e| CompressionError::new(format!("ZSTD decompression failed: {}", e)))?;
 
         Ok(output)
     }
@@ -26,7 +26,7 @@ impl Decompressor for ZstdDecompressor {
     }
 }
 
-// ZSTD compressor
+// zstd 压缩器
 pub struct ZstdCompressor {
     pub level: i32,
 }
@@ -39,19 +39,19 @@ impl ZstdCompressor {
 
 impl Compressor for ZstdCompressor {
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>> {
-        // Use bulk::Compressor and enable include_contentsize
-        // EROFS's ZSTD decompression requires content size information in the frame header
+        // 使用 bulk::Compressor 并开启 include_contentsize
+        // EROFS 的 zstd 解压要求 frame header 中携带 content size 信息
         let mut compressor = zstd::bulk::Compressor::new(self.level)
-            .map_err(|e| CompressionError::new(format!("ZSTD 压缩器初始化失败: {}", e)))?;
+            .map_err(|e| CompressionError::new(format!("ZSTD compressor init failed: {}", e)))?;
 
-        // Enable content size storage, required for EROFS decompression
+        // 开启 content size 记录, EROFS 解压时必须依赖该字段
         compressor
             .include_contentsize(true)
-            .map_err(|e| CompressionError::new(format!("ZSTD 设置 contentsize 失败: {}", e)))?;
+            .map_err(|e| CompressionError::new(format!("ZSTD set contentsize failed: {}", e)))?;
 
         compressor
             .compress(data)
-            .map_err(|e| CompressionError::new(format!("ZSTD 压缩失败: {}", e)))
+            .map_err(|e| CompressionError::new(format!("ZSTD compression failed: {}", e)))
     }
 
     fn compress_destsize(&self, data: &[u8], max_output_size: usize) -> Option<(Vec<u8>, usize)> {
@@ -59,12 +59,12 @@ impl Compressor for ZstdCompressor {
             return None;
         }
 
-        // Binary search + heuristic estimation (refer to erofs-utils implementation)
-        let mut l = 0usize; // Maximum input size that can be placed
+        // 二分查找加启发式估算 (参考 erofs-utils 的实现)
+        let mut l = 0usize; // 可以放得下的最大输入大小
         let mut l_csize = 0usize;
         let mut l_compressed: Vec<u8> = Vec::new();
-        let mut r = data.len() + 1; // Minimum input size that cannot fit
-        let mut m = max_output_size * 4; // initial guess
+        let mut r = data.len() + 1; // 放不下的最小输入大小
+        let mut m = max_output_size * 4; // 初始猜测值
 
         loop {
             m = m.max(l + 1);
@@ -78,7 +78,7 @@ impl Compressor for ZstdCompressor {
                 Ok(compressed) => {
                     let csize = compressed.len();
                     if csize > 0 && csize <= max_output_size {
-                        // successfully placed
+                        // 成功放下
                         l = m;
                         l_csize = csize;
                         l_compressed = compressed;
@@ -86,16 +86,16 @@ impl Compressor for ZstdCompressor {
                         if r <= l + 1 || csize + 1 >= max_output_size {
                             break;
                         }
-                        // Estimate next try size based on compression ratio
+                        // 依据压缩率估算下一次尝试的大小
                         m = (max_output_size * m) / csize;
                     } else {
-                        // Too big after compression
+                        // 压缩后仍然过大
                         r = m;
                         m = (l + r) / 2;
                     }
                 }
                 Err(_) => {
-                    // Compression failed
+                    // 压缩失败
                     r = m;
                     m = (l + r) / 2;
                 }

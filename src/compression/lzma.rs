@@ -1,9 +1,9 @@
-// LZMA decompression implementation
+// LZMA 解压缩实现
 
 use super::{CompressionError, Compressor, Decompressor, Result};
 use std::mem::MaybeUninit;
 
-// LZMA decompressor
+// LZMA 解压器
 pub struct LzmaDecompressor;
 
 impl Decompressor for LzmaDecompressor {
@@ -11,7 +11,7 @@ impl Decompressor for LzmaDecompressor {
         let mut output = Vec::new();
 
         lzma_rs::lzma_decompress(&mut &compressed[..], &mut output)
-            .map_err(|e| CompressionError::new(format!("LZMA 解压缩失败: {}", e)))?;
+            .map_err(|e| CompressionError::new(format!("LZMA decompression failed: {}", e)))?;
 
         Ok(output)
     }
@@ -21,7 +21,7 @@ impl Decompressor for LzmaDecompressor {
     }
 }
 
-// LZMA compressor
+// LZMA 压缩器
 pub struct LzmaCompressor {
     pub level: u32,
 }
@@ -37,7 +37,7 @@ impl Compressor for LzmaCompressor {
         let mut output = Vec::new();
 
         lzma_rs::lzma_compress(&mut &data[..], &mut output)
-            .map_err(|e| CompressionError::new(format!("LZMA 压缩失败: {}", e)))?;
+            .map_err(|e| CompressionError::new(format!("LZMA compression failed: {}", e)))?;
 
         Ok(output)
     }
@@ -47,10 +47,10 @@ impl Compressor for LzmaCompressor {
     }
 }
 
-// MicroLZMA decompressor (EROFS-specific format)
+// MicroLZMA 解压器 (EROFS 专用格式)
 //
-// MicroLZMA is a stripped-down variant of LZMA, supported natively by liblzma.
-// This implementation uses the lzma_microlzma_decoder of liblzma-sys for decompression.
+// MicroLZMA 是 LZMA 的精简变体, liblzma 原生支持该格式
+// 此处使用 liblzma-sys 的 lzma_microlzma_decoder 完成解压
 pub struct MicroLzmaDecompressor;
 
 impl Decompressor for MicroLzmaDecompressor {
@@ -58,16 +58,16 @@ impl Decompressor for MicroLzmaDecompressor {
         use crate::filesystem::erofs::Z_EROFS_LZMA_MAX_DICT_SIZE;
 
         if compressed.is_empty() {
-            return Err(CompressionError::new("MicroLZMA 压缩数据为空".to_string()));
+            return Err(CompressionError::new("MicroLZMA data is empty".to_string()));
         }
 
-        // MicroLZMA decoder using liblzma-sys
+        // 通过 liblzma-sys 使用 MicroLZMA 解码器
         unsafe {
-            // initialize lzma_stream
+            // 初始化 lzma_stream
             let mut strm: MaybeUninit<liblzma_sys::lzma_stream> = MaybeUninit::zeroed();
             let strm_ptr = strm.as_mut_ptr();
 
-            // Initialize MicroLZMA decoder
+            // 初始化 MicroLZMA 解码器
             let ret = liblzma_sys::lzma_microlzma_decoder(
                 strm_ptr,
                 compressed.len() as u64,
@@ -78,31 +78,31 @@ impl Decompressor for MicroLzmaDecompressor {
 
             if ret != liblzma_sys::lzma_ret_LZMA_OK {
                 return Err(CompressionError::new(format!(
-                    "lzma_microlzma_decoder 初始化失败: ret={}",
+                    "lzma_microlzma_decoder init failed: ret={}",
                     ret
                 )));
             }
 
-            // Allocate output buffer
+            // 分配输出缓冲区
             let mut output = vec![0u8; decompressed_size];
 
-            // Set input and output buffers
+            // 设置输入与输出缓冲区
             (*strm_ptr).next_in = compressed.as_ptr();
             (*strm_ptr).avail_in = compressed.len();
             (*strm_ptr).next_out = output.as_mut_ptr();
             (*strm_ptr).avail_out = decompressed_size;
 
-            // Execute decompression
+            // 执行解压
             let ret = liblzma_sys::lzma_code(strm_ptr, liblzma_sys::lzma_action_LZMA_FINISH);
             let total_out = (*strm_ptr).total_out as usize;
 
-            // clean up
+            // 清理资源
             liblzma_sys::lzma_end(strm_ptr);
 
-            // Check results
+            // 检查结果
             if ret != liblzma_sys::lzma_ret_LZMA_STREAM_END {
                 return Err(CompressionError::new(format!(
-                    "MicroLZMA 解压失败: ret={}, 压缩数据: {} 字节, 预期大小: {} 字节, 实际输出: {} 字节",
+                    "MicroLZMA decompression failed: ret={}, compressed: {} bytes, expected size: {} bytes, actual output: {} bytes",
                     ret,
                     compressed.len(),
                     decompressed_size,
@@ -119,7 +119,7 @@ impl Decompressor for MicroLzmaDecompressor {
     }
 }
 
-// MicroLZMA compressor (EROFS proprietary format)
+// MicroLZMA 压缩器 (EROFS 专用格式)
 pub struct MicroLzmaCompressor {
     pub level: u32,
 }
@@ -134,64 +134,64 @@ impl Compressor for MicroLzmaCompressor {
     fn compress(&self, data: &[u8]) -> Result<Vec<u8>> {
         use crate::filesystem::erofs::Z_EROFS_LZMA_MAX_DICT_SIZE;
 
-        // MicroLZMA encoder using liblzma-sys
+        // 通过 liblzma-sys 使用 MicroLZMA 编码器
         unsafe {
-            // initialize lzma_stream
+            // 初始化 lzma_stream
             let mut strm: MaybeUninit<liblzma_sys::lzma_stream> = MaybeUninit::zeroed();
             let strm_ptr = strm.as_mut_ptr();
 
-            // Configure LZMA options
+            // 配置 LZMA 选项
             let mut options: MaybeUninit<liblzma_sys::lzma_options_lzma> = MaybeUninit::zeroed();
             let options_ptr = options.as_mut_ptr();
 
-            // Use preset level initialization options
+            // 使用 preset 压缩等级初始化选项
             let preset = self.level.min(9);
             let ret = liblzma_sys::lzma_lzma_preset(options_ptr, preset);
             if ret != 0 {
                 return Err(CompressionError::new(format!(
-                    "lzma_lzma_preset 失败: preset={}",
+                    "lzma_lzma_preset failed: preset={}",
                     preset
                 )));
             }
 
-            // Set the dictionary size used by EROFS
+            // 设置 EROFS 使用的 dictionary 大小
             (*options_ptr).dict_size = Z_EROFS_LZMA_MAX_DICT_SIZE;
 
-            // Initialize the MicroLZMA encoder
+            // 初始化 MicroLZMA 编码器
             let ret = liblzma_sys::lzma_microlzma_encoder(strm_ptr, options_ptr);
             if ret != liblzma_sys::lzma_ret_LZMA_OK {
                 return Err(CompressionError::new(format!(
-                    "lzma_microlzma_encoder 初始化失败: ret={}",
+                    "lzma_microlzma_encoder init failed: ret={}",
                     ret
                 )));
             }
 
-            // Allocate output buffer
+            // 分配输出缓冲区
             let out_size = data.len() + data.len() / 8 + 256;
             let mut output = vec![0u8; out_size];
 
-            // Set input and output buffers
+            // 设置输入与输出缓冲区
             (*strm_ptr).next_in = data.as_ptr();
             (*strm_ptr).avail_in = data.len();
             (*strm_ptr).next_out = output.as_mut_ptr();
             (*strm_ptr).avail_out = out_size;
 
-            // Perform compression
+            // 执行压缩
             let ret = liblzma_sys::lzma_code(strm_ptr, liblzma_sys::lzma_action_LZMA_FINISH);
             let total_out = (*strm_ptr).total_out as usize;
 
-            // clean up
+            // 清理资源
             liblzma_sys::lzma_end(strm_ptr);
 
-            // Check results
+            // 检查结果
             if ret != liblzma_sys::lzma_ret_LZMA_STREAM_END {
                 return Err(CompressionError::new(format!(
-                    "MicroLZMA 压缩失败: ret={}, total_out={}",
+                    "MicroLZMA compression failed: ret={}, total_out={}",
                     ret, total_out
                 )));
             }
 
-            // Truncate output to actual size
+            // 将输出截断到实际大小
             output.truncate(total_out);
 
             Ok(output)
@@ -205,8 +205,8 @@ impl Compressor for MicroLzmaCompressor {
             return None;
         }
 
-        // MicroLZMA encoder natively supports destsize mode
-        // When the output buffer is full it automatically stops and returns the consumed input size
+        // MicroLZMA 编码器原生支持 destsize 模式
+        // 输出缓冲区写满后会自动停止, 并返回已消耗的输入大小
         unsafe {
             let mut strm: MaybeUninit<liblzma_sys::lzma_stream> = MaybeUninit::zeroed();
             let strm_ptr = strm.as_mut_ptr();
@@ -240,7 +240,7 @@ impl Compressor for MicroLzmaCompressor {
 
             liblzma_sys::lzma_end(strm_ptr);
 
-            // LZMA_STREAM_END indicates successful completion
+            // LZMA_STREAM_END 表示压缩正常结束
             if ret == liblzma_sys::lzma_ret_LZMA_STREAM_END && total_in > 0 && total_out > 0 {
                 output.truncate(total_out);
                 Some((output, total_in))

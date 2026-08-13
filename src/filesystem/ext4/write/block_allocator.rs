@@ -1,27 +1,27 @@
-// EXT4 block allocator
+// EXT4 块分配器
 
 use std::collections::HashSet;
 
-// block allocator
+// 块分配器
 pub struct BlockAllocator {
-    // total number of blocks
+    // 总块数
     total_blocks: u64,
-    // Number of blocks per group
+    // 每个 block group 的块数
     blocks_per_group: u32,
-    // allocated blocks
+    // 已分配的块
     allocated_blocks: HashSet<u64>,
-    // bitmap for each block group
+    // 每个 block group 的 bitmap
     bitmaps: Vec<Vec<u8>>,
-    // Next possible free block (optimized search)
+    // 下一个可能空闲的块 (用于优化查找)
     next_free_block: u64,
 }
 
 impl BlockAllocator {
-    // Create new block allocator
+    // 创建新的块分配器
     pub fn new(total_blocks: u64, blocks_per_group: u32) -> Self {
         let group_count = total_blocks.div_ceil(blocks_per_group as u64) as u32;
 
-        // Initialize bitmap for each block group
+        // 初始化每个 block group 的 bitmap
         let bitmap_size = (blocks_per_group as usize).div_ceil(8);
         let bitmaps = vec![vec![0u8; bitmap_size]; group_count as usize];
 
@@ -34,9 +34,9 @@ impl BlockAllocator {
         }
     }
 
-    // allocate a block
+    // 分配一个块
     pub fn alloc_block(&mut self) -> Option<u64> {
-        // Start searching from next_free_block
+        // 从 next_free_block 开始查找
         for block in self.next_free_block..self.total_blocks {
             if !self.allocated_blocks.contains(&block) {
                 self.allocated_blocks.insert(block);
@@ -46,7 +46,7 @@ impl BlockAllocator {
             }
         }
 
-        // If not found, search from scratch (processing fragments)
+        // 未找到时从头开始查找 (处理碎片)
         for block in 0..self.next_free_block {
             if !self.allocated_blocks.contains(&block) {
                 self.allocated_blocks.insert(block);
@@ -59,14 +59,14 @@ impl BlockAllocator {
         None
     }
 
-    // allocate contiguous blocks
+    // 分配连续的多个块
     pub fn alloc_blocks(&mut self, count: u32) -> Option<Vec<u64>> {
         let mut blocks = Vec::new();
         for _ in 0..count {
             if let Some(block) = self.alloc_block() {
                 blocks.push(block);
             } else {
-                // Rollback allocated blocks
+                // 回滚已分配的块
                 for b in &blocks {
                     self.free_block(*b);
                 }
@@ -76,7 +76,7 @@ impl BlockAllocator {
         Some(blocks)
     }
 
-    // Mark block as used
+    // 将块标记为已使用
     fn mark_block_used(&mut self, block: u64) {
         let group_idx = (block / self.blocks_per_group as u64) as usize;
         let block_in_group = (block % self.blocks_per_group as u64) as usize;
@@ -88,7 +88,7 @@ impl BlockAllocator {
         }
     }
 
-    // free block
+    // 释放块
     pub fn free_block(&mut self, block: u64) {
         self.allocated_blocks.remove(&block);
 
@@ -102,34 +102,34 @@ impl BlockAllocator {
         }
     }
 
-    // reserved metadata block
+    // 预留元数据块
     pub fn reserve_metadata_blocks(&mut self, _group_idx: u32, blocks: &[u64]) {
         for &block in blocks {
             self.allocated_blocks.insert(block);
             self.mark_block_used(block);
-            // Update next_free_block to skip metadata blocks
+            // 更新 next_free_block 以跳过元数据块
             if block >= self.next_free_block {
                 self.next_free_block = block + 1;
             }
         }
     }
 
-    // Get the bitmap of the block group
+    // 获取指定 block group 的 bitmap
     pub fn get_bitmap(&self, group_idx: u32) -> &[u8] {
         &self.bitmaps[group_idx as usize]
     }
 
-    // Get the number of allocated blocks
+    // 获取已分配的块数
     pub fn allocated_count(&self) -> u64 {
         self.allocated_blocks.len() as u64
     }
 
-    // Get the number of free blocks
+    // 获取空闲块数
     pub fn free_count(&self) -> u64 {
         self.total_blocks - self.allocated_count()
     }
 
-    // Get the number of free blocks in the block group
+    // 获取指定 block group 中的空闲块数
     pub fn get_free_blocks_in_group(&self, group_idx: u32) -> u32 {
         let group_start = group_idx as u64 * self.blocks_per_group as u64;
         let group_end = (group_start + self.blocks_per_group as u64).min(self.total_blocks);

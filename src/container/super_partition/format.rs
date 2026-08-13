@@ -1,52 +1,52 @@
-// LP (Logical Partition) metadata format definition
+// LP (Logical Partition) 元数据格式定义
 //
-// Refer to Android source code liblp/include/liblp/metadata_format.h
+// 参考 Android 源码 liblp/include/liblp/metadata_format.h
 
-// LP metadata magic number
+// LP metadata 魔数
 pub const LP_METADATA_GEOMETRY_MAGIC: u32 = 0x616c4467; // "gDla"
 pub const LP_METADATA_HEADER_MAGIC: u32 = 0x414c5030; // "0PLA"
 
-// LP metadata geometry information size
+// LP metadata geometry 区域大小
 pub const LP_METADATA_GEOMETRY_SIZE: u64 = 4096;
 
-// LP metadata version
+// LP metadata 版本号
 pub const LP_METADATA_MAJOR_VERSION: u16 = 10;
 pub const LP_METADATA_MINOR_VERSION_MIN: u16 = 0;
 pub const LP_METADATA_MINOR_VERSION_MAX: u16 = 2;
 
-// Partition properties
+// 分区属性
 pub const LP_PARTITION_ATTR_NONE: u32 = 0x0;
 pub const LP_PARTITION_ATTR_READONLY: u32 = 1 << 0;
 pub const LP_PARTITION_ATTR_SLOT_SUFFIXED: u32 = 1 << 1;
 pub const LP_PARTITION_ATTR_UPDATED: u32 = 1 << 2;
 pub const LP_PARTITION_ATTR_DISABLED: u32 = 1 << 3;
 
-// Sector size (always 512 bytes, compatible with Linux kernel)
+// sector 大小 (固定 512 字节, 与 Linux 内核保持一致)
 pub const LP_SECTOR_SIZE: u64 = 512;
 
-// Space reserved at the beginning of the Super partition (to avoid creating unexpected boot sectors)
+// super 分区起始处的保留空间 (避免产生意外的引导扇区)
 pub const LP_PARTITION_RESERVED_BYTES: u64 = 4096;
 
-// extent target type
+// extent 目标类型
 pub const LP_TARGET_TYPE_LINEAR: u32 = 0;
 pub const LP_TARGET_TYPE_ZERO: u32 = 1;
 
-// Partition group flag
+// group 标志位
 pub const LP_GROUP_SLOT_SUFFIXED: u32 = 1 << 0;
 
-// block device flag
+// block device 标志位
 pub const LP_BLOCK_DEVICE_SLOT_SUFFIXED: u32 = 1 << 0;
 
-// Head mark
+// metadata header 标志位
 pub const LP_HEADER_FLAG_VIRTUAL_AB_DEVICE: u32 = 0x1;
 pub const LP_HEADER_FLAG_OVERLAYS_ACTIVE: u32 = 0x2;
 
-// default value
+// 默认值
 pub const LP_METADATA_DEFAULT_PARTITION_NAME: &str = "super";
 pub const DEFAULT_PARTITION_ALIGNMENT: u32 = 1048576; // 1 MiB
 pub const DEFAULT_BLOCK_SIZE: u32 = 4096;
 
-// Structure size
+// 结构体大小
 pub const LP_METADATA_GEOMETRY_STRUCT_SIZE: u32 = 52;
 pub const LP_METADATA_HEADER_V1_0_SIZE: u32 = 128;
 pub const LP_METADATA_HEADER_V1_2_SIZE: u32 = 256;
@@ -55,20 +55,20 @@ pub const LP_METADATA_EXTENT_SIZE: u32 = 24;
 pub const LP_METADATA_GROUP_SIZE: u32 = 48;
 pub const LP_METADATA_BLOCK_DEVICE_SIZE: u32 = 64;
 
-// LP metadata geometry information
+// LP metadata geometry 信息
 #[derive(Debug, Clone)]
 pub struct LpMetadataGeometry {
-    // Magic number (LP_METADATA_GEOMETRY_MAGIC)
+    // 魔数 (LP_METADATA_GEOMETRY_MAGIC)
     pub magic: u32,
-    // Structure size
+    // 结构体大小
     pub struct_size: u32,
-    // SHA256 checksum
+    // SHA256 校验和
     pub checksum: [u8; 32],
-    // Maximum size of a single metadata copy
+    // 单份 metadata 副本的最大大小
     pub metadata_max_size: u32,
-    // Number of metadata slots
+    // metadata slot 数量
     pub metadata_slot_count: u32,
-    // logical block size
+    // 逻辑块大小
     pub logical_block_size: u32,
 }
 
@@ -118,14 +118,14 @@ impl LpMetadataGeometry {
     }
 }
 
-// LP metadata table descriptor
+// LP metadata 表描述符
 #[derive(Debug, Clone, Default)]
 pub struct LpMetadataTableDescriptor {
-    // Offset of the table (relative to after the metadata header)
+    // 表的偏移 (相对于 metadata header 之后)
     pub offset: u32,
-    // Number of entries in the table
+    // 表中的条目数量
     pub num_entries: u32,
-    // size of each entry
+    // 单个条目的大小
     pub entry_size: u32,
 }
 
@@ -147,32 +147,32 @@ impl LpMetadataTableDescriptor {
     }
 }
 
-// LP metadata header
+// LP metadata header 结构
 #[derive(Debug, Clone)]
 pub struct LpMetadataHeader {
-    // Magic number (LP_METADATA_HEADER_MAGIC)
+    // 魔数 (LP_METADATA_HEADER_MAGIC)
     pub magic: u32,
-    // Major version number
+    // 主版本号
     pub major_version: u16,
-    // minor version number
+    // 次版本号
     pub minor_version: u16,
-    // head size
+    // header 大小
     pub header_size: u32,
-    // Header SHA256 checksum
+    // header 的 SHA256 校验和
     pub header_checksum: [u8; 32],
-    // total size of all tables
+    // 所有表的总大小
     pub tables_size: u32,
-    // SHA256 checksum of table data
+    // 表数据的 SHA256 校验和
     pub tables_checksum: [u8; 32],
-    // partition table descriptor
+    // partition table 描述符
     pub partitions: LpMetadataTableDescriptor,
-    // extent table descriptor
+    // extent 表描述符
     pub extents: LpMetadataTableDescriptor,
-    // Partition group table descriptor
+    // group 表描述符
     pub groups: LpMetadataTableDescriptor,
-    // block device table descriptor
+    // block device 表描述符
     pub block_devices: LpMetadataTableDescriptor,
-    // Header flag (v1.2+)
+    // header 标志位 (v1.2 及以上)
     pub flags: u32,
 }
 
@@ -250,18 +250,18 @@ impl LpMetadataHeader {
     }
 }
 
-// LP metadata partition
+// LP metadata 分区条目
 #[derive(Debug, Clone)]
 pub struct LpMetadataPartition {
-    // Partition name (36 bytes, null terminated)
+    // 分区名 (36 字节, 以 null 结尾)
     pub name: [u8; 36],
-    // Partition properties
+    // 分区属性
     pub attributes: u32,
-    // index of first extent
+    // 首个 extent 的索引
     pub first_extent_index: u32,
-    // Number of extents
+    // extent 数量
     pub num_extents: u32,
-    // Index of the partition group to which it belongs
+    // 所属 group 的索引
     pub group_index: u32,
 }
 
@@ -322,16 +322,16 @@ impl LpMetadataPartition {
     }
 }
 
-// LP metadata extent
+// LP metadata extent 条目
 #[derive(Debug, Clone, Default)]
 pub struct LpMetadataExtent {
-    // Extent size in 512-byte sectors
+    // extent 大小, 以 512 字节 sector 为单位
     pub num_sectors: u64,
-    // Target type (LP_TARGET_TYPE_*)
+    // 目标类型 (LP_TARGET_TYPE_*)
     pub target_type: u32,
-    // Target data (LINEAR: physical sector offset, ZERO: must be 0)
+    // 目标数据 (LINEAR: 物理 sector 偏移, ZERO: 必须为 0)
     pub target_data: u64,
-    // Target source (LINEAR: block device index, ZERO: must be 0)
+    // 目标来源 (LINEAR: block device 索引, ZERO: 必须为 0)
     pub target_source: u32,
 }
 
@@ -380,14 +380,14 @@ impl LpMetadataExtent {
     }
 }
 
-// LP metadata partition group
+// LP metadata group 条目
 #[derive(Debug, Clone)]
 pub struct LpMetadataPartitionGroup {
-    // Partition group name (36 bytes, null terminated)
+    // group 名称 (36 字节, 以 null 结尾)
     pub name: [u8; 36],
-    // logo
+    // 标志位
     pub flags: u32,
-    // Maximum size (0 means unlimited)
+    // 最大大小 (0 表示不限制)
     pub maximum_size: u64,
 }
 
@@ -445,20 +445,20 @@ impl LpMetadataPartitionGroup {
     }
 }
 
-// LP metadata block device
+// LP metadata block device 条目
 #[derive(Debug, Clone)]
 pub struct LpMetadataBlockDevice {
-    // The first sector available for allocation of a logical partition
+    // 可供逻辑分区分配的首个 sector
     pub first_logical_sector: u64,
-    // Partition alignment
+    // 分区 alignment
     pub alignment: u32,
-    // Alignment offset
+    // alignment 偏移
     pub alignment_offset: u32,
-    // block device size
+    // block device 大小
     pub size: u64,
-    // Partition name (36 bytes, null terminated)
+    // 分区名 (36 字节, 以 null 结尾)
     pub partition_name: [u8; 36],
-    // logo
+    // 标志位
     pub flags: u32,
 }
 
@@ -531,7 +531,7 @@ impl LpMetadataBlockDevice {
     }
 }
 
-// Full LP metadata
+// 完整的 LP metadata
 #[derive(Debug, Clone, Default)]
 pub struct LpMetadata {
     pub geometry: LpMetadataGeometry,

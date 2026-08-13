@@ -1,10 +1,10 @@
-// Subcommand dispatch.
+// 子命令分发。
 
 use crate::cli::{self, Cli, Commands};
 use crate::utils::logger;
 use anyhow::{Result, anyhow};
 
-// CLI main entry point
+// 命令行主入口
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Commands::Unpack {

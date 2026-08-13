@@ -1,23 +1,23 @@
-// Android Sparse Image format definition
+// Android sparse image 格式定义
 //
-// Reference Android source code libsparse
+// 参考 Android 源码中的 libsparse
 
-// Sparse file magic number
+// sparse 文件魔数
 pub const SPARSE_HEADER_MAGIC: u32 = 0xED26FF3A;
 
-// head size
+// 文件头大小
 pub const SPARSE_HEADER_SIZE: usize = 28;
 
-// Chunk head size
+// chunk 头大小
 pub const CHUNK_HEADER_SIZE: u32 = 12;
 
-// Chunk type
+// chunk 类型
 pub const CHUNK_TYPE_RAW: u16 = 0xCAC1;
 pub const CHUNK_TYPE_FILL: u16 = 0xCAC2;
 pub const CHUNK_TYPE_DONT_CARE: u16 = 0xCAC3;
 pub const CHUNK_TYPE_CRC32: u16 = 0xCAC4;
 
-// Sparse file header
+// sparse 文件头
 #[derive(Debug, Clone)]
 pub struct SparseHeader {
     pub magic: u32,
@@ -82,7 +82,7 @@ impl SparseHeader {
     }
 }
 
-// Chunk head
+// chunk 头
 #[derive(Debug, Clone)]
 pub struct ChunkHeader {
     pub chunk_type: u16,

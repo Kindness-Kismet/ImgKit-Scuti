@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::sync::{Arc, RwLock};
 
-// Generic read backend over any Read+Seek source (File, SparseReader, ...)
+// 通用读取后端, 支持任意 Read+Seek 数据源 (File, SparseReader 等)
 pub struct F2fsVolume<R: Read + Seek + Send = File> {
     file: Arc<RwLock<R>>,
     pub superblock: Superblock,
@@ -22,16 +22,16 @@ impl F2fsVolume<File> {
 }
 
 impl<R: Read + Seek + Send> F2fsVolume<R> {
-    // Construct from any Read+Seek stream (plain file or sparse virtual stream)
+    // 从任意 Read+Seek 流构造 (普通文件或 sparse 虚拟流)
     pub fn from_reader(reader: R) -> Result<Self> {
         let file = Arc::new(RwLock::new(reader));
 
-        // Read superblock
+        // 读取 superblock
         let mut buf = vec![0u8; F2FS_BLKSIZE];
         {
             let mut f = file
                 .write()
-                .map_err(|e| F2fsError::LockError(format!("文件锁写入失败: {}", e)))?;
+                .map_err(|e| F2fsError::LockError(format!("file write lock poisoned: {}", e)))?;
             f.seek(SeekFrom::Start(F2FS_SUPER_OFFSET))?;
             f.read_exact(&mut buf)?;
         }
@@ -39,7 +39,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
         let log_blocks_per_seg = u32::from_le_bytes([buf[20], buf[21], buf[22], buf[23]]);
         let blocks_per_seg = 1u32
             .checked_shl(log_blocks_per_seg)
-            .ok_or_else(|| F2fsError::InvalidData("无效的 log_blocks_per_seg".into()))?;
+            .ok_or_else(|| F2fsError::InvalidData("invalid log_blocks_per_seg".into()))?;
         let segment_count_nat = u32::from_le_bytes([buf[60], buf[61], buf[62], buf[63]]);
         let nat_blocks_per_copy = (segment_count_nat / 2).saturating_mul(blocks_per_seg);
 
@@ -75,7 +75,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
 
         let mut file = file
             .write()
-            .map_err(|e| F2fsError::LockError(format!("文件锁写入失败: {}", e)))?;
+            .map_err(|e| F2fsError::LockError(format!("file write lock poisoned: {}", e)))?;
         file.seek(SeekFrom::Start(offset))?;
         file.read_exact(&mut buf)?;
 
@@ -84,7 +84,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
 
     fn read_le_u32(data: &[u8], offset: usize) -> Result<u32> {
         if offset + 4 > data.len() {
-            return Err(F2fsError::InvalidData("读取 u32 越界".into()));
+            return Err(F2fsError::InvalidData("u32 read out of bounds".into()));
         }
         Ok(u32::from_le_bytes([
             data[offset],
@@ -96,7 +96,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
 
     fn read_le_u64(data: &[u8], offset: usize) -> Result<u64> {
         if offset + 8 > data.len() {
-            return Err(F2fsError::InvalidData("读取 u64 越界".into()));
+            return Err(F2fsError::InvalidData("u64 read out of bounds".into()));
         }
         Ok(u64::from_le_bytes([
             data[offset],
@@ -133,7 +133,7 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             return Ok(nat_journal);
         }
 
-        // compact summary 前 507 字节是 NAT journal。
+        // compact summary 前 507 字节是 NAT journal
         let nat_count = u16::from_le_bytes([compact_sum[0], compact_sum[1]]) as usize;
         let entry_size = 13usize; // nid(4) + nat_entry(9)
         for index in 0..nat_count {
@@ -169,12 +169,12 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
     }
 
     fn get_nat_entry(&self, nid: Nid) -> Result<NatEntry> {
-        // Check cache first
+        // 优先查询缓存
         {
             let cache = self
                 .nat_cache
                 .read()
-                .map_err(|e| F2fsError::LockError(format!("NAT 缓存读取失败: {}", e)))?;
+                .map_err(|e| F2fsError::LockError(format!("NAT cache lock poisoned: {}", e)))?;
             if let Some(entry) = cache.get(&nid) {
                 return Ok(entry.clone());
             }
@@ -183,19 +183,19 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             let cache = self
                 .nat_journal_cache
                 .read()
-                .map_err(|e| F2fsError::LockError(format!("NAT journal 缓存读取失败: {}", e)))?;
+                .map_err(|e| F2fsError::LockError(format!("NAT journal lock poisoned: {}", e)))?;
             if let Some(entry) = cache.get(&nid) {
                 let entry = entry.clone();
                 let mut nat_cache = self
                     .nat_cache
                     .write()
-                    .map_err(|e| F2fsError::LockError(format!("NAT 缓存写入失败: {}", e)))?;
+                    .map_err(|e| F2fsError::LockError(format!("NAT cache lock poisoned: {}", e)))?;
                 nat_cache.insert(nid, entry.clone());
                 return Ok(entry);
             }
         }
 
-        // Read NAT block
+        // 读取 NAT block
         let nat_block_idx = nid.0 / NAT_ENTRY_PER_BLOCK as u32;
         let entry_idx = (nid.0 % NAT_ENTRY_PER_BLOCK as u32) as usize;
         let mut entry =
@@ -213,12 +213,12 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
             entry = secondary;
         }
 
-        // cache
+        // 写入缓存
         {
             let mut cache = self
                 .nat_cache
                 .write()
-                .map_err(|e| F2fsError::LockError(format!("NAT 缓存写入失败: {}", e)))?;
+                .map_err(|e| F2fsError::LockError(format!("NAT cache lock poisoned: {}", e)))?;
             cache.insert(nid, entry.clone());
         }
 
@@ -236,7 +236,9 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
         let entry_offset = entry_idx * NAT_ENTRY_SIZE;
         let entry_end = entry_offset + NAT_ENTRY_SIZE;
         if entry_end > data.len() {
-            return Err(F2fsError::InvalidData("NAT 条目读取越界".into()));
+            return Err(F2fsError::InvalidData(
+                "NAT entry read out of bounds".into(),
+            ));
         }
         NatEntry::from_bytes(&data[entry_offset..entry_end])
     }
