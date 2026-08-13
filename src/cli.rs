@@ -1,12 +1,17 @@
 // CLI subcommand module.
 // Provides implementations for each subcommand.
 
+mod args;
+mod dispatch;
 mod erofs_pack;
 mod ext4_pack;
 mod extract;
 mod f2fs_pack;
+mod help;
 mod super_pack;
 
+pub use args::{Cli, Commands};
+pub use dispatch::run;
 pub use erofs_pack::run_erofs_pack;
 pub use ext4_pack::run_ext4_pack;
 pub use extract::run_extract;
