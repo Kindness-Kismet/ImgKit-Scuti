@@ -138,10 +138,20 @@ impl SuperblockBuilder {
         let cp_blkaddr = segment0_blkaddr;
 
         // Calculate the total number of segments
-        let total_segments = ((self.image_size - zone_align_start_offset) / segment_size_bytes)
-            as u32
-            / self.segs_per_sec
-            * self.segs_per_sec;
+        // An image smaller than the zone alignment offset underflows here, so it must be
+        // rejected up front; otherwise the segment count wraps and drives a huge allocation
+        let usable_bytes = self
+            .image_size
+            .checked_sub(zone_align_start_offset)
+            .ok_or_else(|| {
+                F2fsError::InvalidData(format!(
+                    "image too small: {} bytes, requires more than {} bytes for zone alignment",
+                    self.image_size, zone_align_start_offset
+                ))
+            })?;
+
+        let total_segments =
+            (usable_bytes / segment_size_bytes) as u32 / self.segs_per_sec * self.segs_per_sec;
 
         if total_segments < F2FS_MIN_SEGMENTS as u32 {
             return Err(F2fsError::InvalidData(format!(
@@ -474,6 +484,26 @@ mod tests {
         assert!(layout.ssa_blkaddr > layout.nat_blkaddr);
         assert!(layout.nat_blkaddr > layout.sit_blkaddr);
         assert!(layout.sit_blkaddr > layout.cp_blkaddr);
+    }
+
+    // An image smaller than the zone alignment offset must return an error
+    // instead of underflowing into a huge segment count
+    #[test]
+    fn test_layout_rejects_undersized_image() {
+        let mut builder = SuperblockBuilder::new(256 * 1024);
+        let err = builder.calculate_layout().unwrap_err();
+        assert!(
+            err.to_string().contains("image too small"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    // Larger than the alignment offset but still below the minimum segment count
+    #[test]
+    fn test_layout_rejects_too_few_segments() {
+        let mut builder = SuperblockBuilder::new(4 * 1024 * 1024);
+        assert!(builder.calculate_layout().is_err());
     }
 
     #[test]
