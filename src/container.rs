@@ -1,7 +1,8 @@
 // Container layer module
 //
-// Provides sparse image and super partition container formats.
+// Provides sparse image, super partition and OTA payload container formats.
 
+pub mod payload;
 pub mod sparse;
 pub mod super_partition;
 

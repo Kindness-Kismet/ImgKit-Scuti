@@ -17,6 +17,11 @@ struct MagicBytes {
 
 // Magic bytes lookup table
 const MAGIC_BYTES: &[MagicBytes] = &[
+    MagicBytes {
+        offset: 0,
+        expected: b"CrAU",
+        file_type: "payload",
+    },
     // Sparse image (checked first, may be a sparse super)
     MagicBytes {
         offset: 0,

@@ -2,7 +2,9 @@
 // Supports F2FS, EXT4, EROFS, and Super partition extraction.
 
 use crate::{
-    container::super_partition::extractor as super_extractor,
+    container::{
+        payload::extractor as payload_extractor, super_partition::extractor as super_extractor,
+    },
     filesystem::{
         erofs::read::extractor as erofs_extractor, ext4::read::extractor as ext4_extractor,
         f2fs::read::extractor as f2fs_extractor,
@@ -68,9 +70,17 @@ pub fn run_extract(
             };
             super_extractor::extract_image(config)?;
         }
+        "payload" => {
+            let config = payload_extractor::ExtractConfig {
+                input_payload: input.to_string(),
+                output_dir: output.to_string(),
+                partition_names: Vec::new(),
+            };
+            payload_extractor::extract_image(config)?;
+        }
         _ => {
             return Err(anyhow!(
-                "unsupported filesystem: {}, supported: f2fs, ext4, erofs, super",
+                "unsupported filesystem: {}, supported: f2fs, ext4, erofs, super, payload",
                 fs_type
             ));
         }

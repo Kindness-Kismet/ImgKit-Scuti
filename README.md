@@ -29,6 +29,9 @@ A CLI toolkit for Android image unpacking and repacking.
 | EROFS | Yes | Direct detection and extraction |
 | Super (Android LP) | Yes | Partition-level extraction |
 | Android Sparse image | Yes | Auto-converts sparse then detects filesystem |
+| OTA `payload.bin` | Yes | Extracts partition images from full OTA payloads |
+
+Incremental OTA payloads require source partition images and are not supported yet.
 
 ## Supported Pack Types
 
@@ -40,6 +43,8 @@ A CLI toolkit for Android image unpacking and repacking.
 - `erofs`
 
 Sparse output is supported in applicable scenarios.
+
+Packing OTA `payload.bin` is not supported: a usable payload must be signed with the OEM private key, so a self-built payload cannot be applied by `update_engine`.
 
 ## Why ImgKit-Scuti
 

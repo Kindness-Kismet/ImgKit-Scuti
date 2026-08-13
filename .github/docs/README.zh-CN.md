@@ -29,6 +29,9 @@
 | EROFS | 是 | 直接识别与提取 |
 | Super (Android LP) | 是 | 可按分区提取内容 |
 | Android Sparse 镜像 | 是 | 自动去 sparse 后继续识别实际文件系统 |
+| OTA `payload.bin` | 是 | 从完整 OTA 包中提取分区镜像 |
+
+增量 OTA 需要旧版本分区镜像，当前暂不支持。
 
 ## 支持的打包类型
 
@@ -40,6 +43,8 @@
 - `erofs`
 
 在支持的场景下可输出 sparse 镜像。
+
+不支持打包 OTA `payload.bin`：可用的 payload 必须由厂商私钥签名，自行构建的 payload 无法被 `update_engine` 应用。
 
 ## 工具优势
 
