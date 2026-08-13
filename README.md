@@ -131,7 +131,7 @@ imgkit_scuti pack --type super [OPTIONS] -o <OUTPUT>
 | `-g, --group <name:max_size>` | No | Partition group definition, repeatable |
 | `-p, --partition <name:attrs:size:group>` | No | Partition definition, repeatable |
 | `-i, --image <name=path>` | No | Partition image mapping, repeatable |
-| `-m, --metadata-size <SIZE>` | No | Metadata size, default `65536` |
+| `--metadata-size <SIZE>` | No | Metadata size, default `65536` |
 | `--slots <NUM>` | No | Metadata slots, default `2` |
 | `-n, --name <NAME>` | No | Block device name, default `super` |
 | `-b, --block-size <SIZE>` | No | Logical block size, default `4096` |

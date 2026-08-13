@@ -1,4 +1,4 @@
-// Full help text shown through clap after_help.
+// 长帮助文本, 通过 clap 的 after_help 展示。
 
 pub const FULL_HELP: &str = r#"
 ================================================================================
@@ -7,19 +7,27 @@ pub const FULL_HELP: &str = r#"
 
 Usage: imgkit_scuti unpack [OPTIONS] -i <INPUT> -o <OUTPUT>
 
-Supported formats: Super, F2FS, EXT4, EROFS (auto-detected)
+Supported formats: Super, F2FS, EXT4, EROFS, OTA payload.bin (auto-detected)
 
 Arguments:
   -i, --input <FILE>              Path to the input image file
-  -o, --output <DIR>              Path to the output directory
+  -o, --output <DIR>              Path to the output directory (not needed with --list)
       --fs-config-path <FILE>     Custom fs_config file path (optional)
       --file-contexts-path <FILE> Custom file_contexts file path (optional)
+  -p, --partition <NAME>          Extract only the named partition, repeatable
+                                  (super and payload only; default: all)
+      --list                      List partition names without extracting
+                                  (super and payload only)
   -l, --level <0-3>               Log level: 0=silent 1=basic 2=verbose 3=debug [default: 1]
   -c, --clean                     Remove existing files in the output directory
 
 Examples:
   imgkit_scuti unpack -i system.img -o output/
   imgkit_scuti unpack -i super.img -o output/ -l 2
+  imgkit_scuti unpack -i payload.bin -o partitions/
+  imgkit_scuti unpack -i payload.bin --list
+  imgkit_scuti unpack -i payload.bin -o partitions/ -p system -p vendor
+  imgkit_scuti unpack -i super.img -o partitions/ -p mi_ext_a
   imgkit_scuti unpack -i system.img -o output/ --clean
 
 ================================================================================
@@ -44,7 +52,7 @@ Required:
   -i, --image <name=path>         Partition image mapping, repeatable
 
 Optional:
-  -m, --metadata-size <SIZE>      Maximum metadata size [default: 65536]
+      --metadata-size <SIZE>      Maximum metadata size [default: 65536]
       --slots <NUM>               Number of metadata slots [default: 2]
   -n, --name <NAME>               Block device name [default: super]
   -b, --block-size <SIZE>         Logical block size [default: 4096]

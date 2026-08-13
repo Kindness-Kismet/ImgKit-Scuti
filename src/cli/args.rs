@@ -137,8 +137,8 @@ pub enum Commands {
         #[arg(short, long, help = "Device size in bytes, or 'auto' (super)")]
         device_size: Option<String>,
 
+        // 短选项 -m 已由 mount_point 占用, 这里只提供长选项
         #[arg(
-            short,
             long,
             default_value = "65536",
             help = "Maximum metadata size in bytes (super)"

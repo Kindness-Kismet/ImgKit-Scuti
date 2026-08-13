@@ -91,7 +91,7 @@ imgkit_scuti unpack [OPTIONS] -i <INPUT> -o <OUTPUT>
 | 参数 | 必填 | 说明 |
 |---|---|---|
 | `-i, --input <FILE>` | 是 | 输入镜像路径 |
-| `-o, --output <DIR>` | 是 | 输出目录路径，使用 `--list` 时不需要 |
+| `-o, --output <DIR>` | 是 | 输出目录路径。使用 `--list` 时无需提供 |
 | `--fs-config-path <FILE>` | 否 | 自定义导出的 `fs_config` 路径 |
 | `--file-contexts-path <FILE>` | 否 | 自定义导出的 `file_contexts` 路径 |
 | `-p, --partition <NAME>` | 否 | 仅提取指定分区，可重复传入。仅对 `super` 与 `payload.bin` 生效，默认提取全部 |
@@ -131,7 +131,7 @@ imgkit_scuti pack --type super [OPTIONS] -o <OUTPUT>
 | `-g, --group <name:max_size>` | 否 | 分区组定义，可重复 |
 | `-p, --partition <name:attrs:size:group>` | 否 | 分区定义，可重复 |
 | `-i, --image <name=path>` | 否 | 分区镜像映射，可重复 |
-| `-m, --metadata-size <SIZE>` | 否 | 元数据大小，默认 `65536` |
+| `--metadata-size <SIZE>` | 否 | 元数据大小，默认 `65536` |
 | `--slots <NUM>` | 否 | 元数据槽数量，默认 `2` |
 | `-n, --name <NAME>` | 否 | 块设备名，默认 `super` |
 | `-b, --block-size <SIZE>` | 否 | 逻辑块大小，默认 `4096` |
