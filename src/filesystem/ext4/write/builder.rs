@@ -1,6 +1,7 @@
 // EXT4 Image Builder
 
 use crate::filesystem::ext4::Result;
+use crate::filesystem::ext4::error::Ext4Error;
 use crate::filesystem::ext4::types::*;
 use crate::filesystem::ext4::write::directory::file_type;
 use crate::filesystem::ext4::write::*;
@@ -89,7 +90,8 @@ impl Ext4Builder {
         let timestamp = config.timestamp.unwrap_or_else(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                // Fall back to 0 when the clock predates the epoch; the image stays valid
+                .unwrap_or_default()
                 .as_secs()
         }) as u32;
 
@@ -469,7 +471,7 @@ impl Ext4Builder {
             let mut gd = Ext4GroupDescriptor::try_read_from_bytes(
                 &[0u8; std::mem::size_of::<Ext4GroupDescriptor>()],
             )
-            .unwrap();
+            .map_err(|_| Ext4Error::StructInit("ext4 group descriptor"))?;
             gd.bg_block_bitmap_lo = (block_bitmap & 0xFFFFFFFF) as u32;
             gd.bg_block_bitmap_hi = (block_bitmap >> 32) as u32;
             gd.bg_inode_bitmap_lo = (inode_bitmap & 0xFFFFFFFF) as u32;

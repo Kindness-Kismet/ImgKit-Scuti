@@ -28,6 +28,8 @@ pub enum Ext4Error {
     ExtentTreeTooDeep { depth: u8 },
     #[error("detected extent tree cycle at block {block}")]
     ExtentCycleDetected { block: u64 },
+    #[error("failed to initialize on-disk structure: {0}")]
+    StructInit(&'static str),
 }
 
 pub type Result<T> = std::result::Result<T, Ext4Error>;

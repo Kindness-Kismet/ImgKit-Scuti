@@ -313,8 +313,10 @@ impl F2fsBuilder {
 
             // Try to add to current block, create new block if full
             let dentry = DentryInfo::new(name, ino, file_type);
-            let current_block = dentry_blocks.last_mut().unwrap();
-            if !current_block.add_entry(dentry.clone()) {
+            let added = dentry_blocks
+                .last_mut()
+                .is_some_and(|current_block| current_block.add_entry(dentry.clone()));
+            if !added {
                 let mut new_block = DentryBlockBuilder::new();
                 new_block.add_entry(dentry);
                 dentry_blocks.push(new_block);

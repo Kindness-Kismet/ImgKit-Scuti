@@ -28,7 +28,8 @@ impl InodeBuilder {
     pub fn new() -> Self {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            // Fall back to 0 when the clock predates the epoch; the image stays valid
+            .unwrap_or_default()
             .as_secs() as u32;
 
         InodeBuilder {

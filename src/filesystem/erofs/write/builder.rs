@@ -254,10 +254,13 @@ impl ErofsBuilder {
             let (file_data, physical_clusters, compress_meta_size, use_compression) =
                 if !symlink_info.is_symlink {
                     let data = fs::read(source_path)?;
-                    let use_comp = self.compressor.is_some() && !data.is_empty();
+                    let compressor = if data.is_empty() {
+                        None
+                    } else {
+                        self.compressor.as_ref()
+                    };
 
-                    if use_comp {
-                        let compressor = self.compressor.as_ref().unwrap();
+                    if let Some(compressor) = compressor {
                         let pclusters =
                             compress_file_data(&data, self.block_size, compressor.as_ref())?;
 

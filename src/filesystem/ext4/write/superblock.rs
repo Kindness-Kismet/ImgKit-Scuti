@@ -1,6 +1,7 @@
 // EXT4 SuperBlock Builder
 
 use crate::filesystem::ext4::Result;
+use crate::filesystem::ext4::error::Ext4Error;
 use crate::filesystem::ext4::types::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zerocopy::TryFromBytes;
@@ -78,7 +79,8 @@ impl SuperblockBuilder {
             uuid: [0u8; 16],
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                // Fall back to 0 when the clock predates the epoch; the image stays valid
+                .unwrap_or_default()
                 .as_secs() as u32,
             free_blocks_count: None,
             free_inodes_count: None,
@@ -135,7 +137,7 @@ impl SuperblockBuilder {
 
         let mut sb =
             Ext4Superblock::try_read_from_bytes(&[0u8; std::mem::size_of::<Ext4Superblock>()])
-                .unwrap();
+                .map_err(|_| Ext4Error::StructInit("ext4 superblock"))?;
 
         // Basic information
         sb.s_inodes_count = self.inodes_count;

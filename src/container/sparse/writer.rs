@@ -305,8 +305,9 @@ impl SparseWriter {
                 continue;
             }
 
-            let last = result.last_mut().unwrap();
-            match (&mut *last, &chunk) {
+            // The emptiness check above guarantees an element exists
+            let last_index = result.len() - 1;
+            match (&mut result[last_index], &chunk) {
                 (InternalChunk::DontCare(a), InternalChunk::DontCare(b)) => {
                     *a += b;
                 }
