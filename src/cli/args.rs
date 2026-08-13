@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "imgkit_scuti")]
-#[command(about = "Android image tool - unpack and pack Super/F2FS/EXT4/EROFS images")]
+#[command(about = "Android image tool with OTA payload unpacking support")]
 #[command(after_help = FULL_HELP)]
 pub struct Cli {
     #[command(subcommand)]
@@ -15,19 +15,34 @@ pub struct Cli {
 #[derive(Subcommand)]
 #[allow(clippy::large_enum_variant)]
 pub enum Commands {
-    #[command(about = "Unpack an image file (supports Super/F2FS/EXT4/EROFS)")]
+    #[command(about = "Unpack an image file (supports Super/F2FS/EXT4/EROFS/Payload)")]
     Unpack {
         #[arg(short, long, help = "Path to the input image file")]
         input: String,
 
-        #[arg(short, long, help = "Path to the output directory")]
-        output: String,
+        #[arg(
+            short,
+            long,
+            required_unless_present = "list",
+            help = "Path to the output directory"
+        )]
+        output: Option<String>,
 
         #[arg(long, help = "Custom fs_config file path (optional)")]
         fs_config_path: Option<String>,
 
         #[arg(long, help = "Custom file_contexts file path (optional)")]
         file_contexts_path: Option<String>,
+
+        #[arg(
+            short,
+            long,
+            help = "Extract only the named partition (super/payload), repeatable"
+        )]
+        partition: Vec<String>,
+
+        #[arg(long, help = "List partition names without extracting (super/payload)")]
+        list: bool,
 
         #[arg(
             short,

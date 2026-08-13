@@ -91,9 +91,11 @@ imgkit_scuti unpack [OPTIONS] -i <INPUT> -o <OUTPUT>
 | Option | Required | Description |
 |---|---|---|
 | `-i, --input <FILE>` | Yes | Path to input image file |
-| `-o, --output <DIR>` | Yes | Path to output directory |
+| `-o, --output <DIR>` | Yes | Path to output directory. Not required with `--list` |
 | `--fs-config-path <FILE>` | No | Custom output path for generated `fs_config` |
 | `--file-contexts-path <FILE>` | No | Custom output path for generated `file_contexts` |
+| `-p, --partition <NAME>` | No | Extract only the named partition, repeatable. Applies to `super` and `payload.bin` only; default extracts all |
+| `--list` | No | Print partition names and exit, without extracting. Applies to `super` and `payload.bin` only |
 | `-l, --level <0-3>` | No | Log level, default `1` |
 | `-c, --clean` | No | Remove existing extracted files before unpack |
 
@@ -102,6 +104,9 @@ Examples:
 ```bash
 imgkit_scuti unpack -i system.img -o out/system
 imgkit_scuti unpack -i super.img -o out/super -l 2
+imgkit_scuti unpack -i payload.bin --list
+imgkit_scuti unpack -i payload.bin -o out/payload -p system -p vendor
+imgkit_scuti unpack -i super.img -o out/super -p mi_ext
 imgkit_scuti unpack -i system.img -o out/system --clean
 ```
 

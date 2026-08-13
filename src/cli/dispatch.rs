@@ -12,11 +12,21 @@ pub fn run(cli: Cli) -> Result<()> {
             output,
             fs_config_path,
             file_contexts_path,
+            partition,
+            list,
             level,
             clean,
         } => {
             logger::init(level);
-            cli::run_extract(&input, &output, fs_config_path, file_contexts_path, clean)
+            cli::run_extract(
+                &input,
+                output.as_deref(),
+                fs_config_path,
+                file_contexts_path,
+                partition,
+                list,
+                clean,
+            )
         }
         Commands::Pack {
             r#type,

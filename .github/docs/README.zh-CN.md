@@ -91,9 +91,11 @@ imgkit_scuti unpack [OPTIONS] -i <INPUT> -o <OUTPUT>
 | 参数 | 必填 | 说明 |
 |---|---|---|
 | `-i, --input <FILE>` | 是 | 输入镜像路径 |
-| `-o, --output <DIR>` | 是 | 输出目录路径 |
+| `-o, --output <DIR>` | 是 | 输出目录路径，使用 `--list` 时不需要 |
 | `--fs-config-path <FILE>` | 否 | 自定义导出的 `fs_config` 路径 |
 | `--file-contexts-path <FILE>` | 否 | 自定义导出的 `file_contexts` 路径 |
+| `-p, --partition <NAME>` | 否 | 仅提取指定分区，可重复传入。仅对 `super` 与 `payload.bin` 生效，默认提取全部 |
+| `--list` | 否 | 仅列出分区名后退出，不执行提取。仅对 `super` 与 `payload.bin` 生效 |
 | `-l, --level <0-3>` | 否 | 日志级别，默认 `1` |
 | `-c, --clean` | 否 | 解包前删除已有输出 |
 
@@ -102,6 +104,9 @@ imgkit_scuti unpack [OPTIONS] -i <INPUT> -o <OUTPUT>
 ```bash
 imgkit_scuti unpack -i system.img -o out/system
 imgkit_scuti unpack -i super.img -o out/super -l 2
+imgkit_scuti unpack -i payload.bin --list
+imgkit_scuti unpack -i payload.bin -o out/payload -p system -p vendor
+imgkit_scuti unpack -i super.img -o out/super -p mi_ext
 imgkit_scuti unpack -i system.img -o out/system --clean
 ```
 

@@ -1,5 +1,4 @@
-// Image extraction command.
-// Supports F2FS, EXT4, EROFS, and Super partition extraction.
+// 镜像提取命令, 支持文件系统、Super 分区与 OTA payload。
 
 use crate::{
     container::{
@@ -14,12 +13,14 @@ use crate::{
 use anyhow::{Result, anyhow};
 use std::path::Path;
 
-// Extract an image
+// 提取镜像
 pub fn run_extract(
     input: &str,
-    output: &str,
+    output: Option<&str>,
     fs_config_path: Option<String>,
     file_contexts_path: Option<String>,
+    partition_names: Vec<String>,
+    list_only: bool,
     clean: bool,
 ) -> Result<()> {
     let fs_type = detect_filesystem(Path::new(input))?;
@@ -29,6 +30,21 @@ pub fn run_extract(
     } else {
         log::info!("detected filesystem type: {}", fs_type);
     }
+
+    // 分区筛选与列举只对容器格式有效
+    if (!partition_names.is_empty() || list_only) && !is_container_type(&fs_type) {
+        return Err(anyhow!(
+            "--partition and --list only apply to container images (super, payload), got: {}",
+            fs_type
+        ));
+    }
+
+    if list_only {
+        return list_partitions(input, &fs_type);
+    }
+
+    // clap 已保证非列举模式下必须提供输出目录
+    let output = output.ok_or_else(|| anyhow!("--output is required unless --list is used"))?;
 
     if clean {
         clean_output_directory(input, output)?;
@@ -66,7 +82,7 @@ pub fn run_extract(
             let config = super_extractor::ExtractConfig {
                 input_image: input.to_string(),
                 output_dir: output.to_string(),
-                partition_names: Vec::new(),
+                partition_names,
             };
             super_extractor::extract_image(config)?;
         }
@@ -74,13 +90,13 @@ pub fn run_extract(
             let config = payload_extractor::ExtractConfig {
                 input_payload: input.to_string(),
                 output_dir: output.to_string(),
-                partition_names: Vec::new(),
+                partition_names,
             };
             payload_extractor::extract_image(config)?;
         }
         _ => {
             return Err(anyhow!(
-                "unsupported filesystem: {}, supported: f2fs, ext4, erofs, super, payload",
+                "unsupported image: {}, supported: f2fs, ext4, erofs, super, payload",
                 fs_type
             ));
         }
@@ -89,7 +105,26 @@ pub fn run_extract(
     Ok(())
 }
 
-// Remove the extracted directory and config files for the given input image
+// 判断是否为支持按分区筛选的容器格式
+fn is_container_type(fs_type: &str) -> bool {
+    matches!(fs_type, "super" | "sparse_super" | "payload")
+}
+
+// 打印容器内的分区名, 不做提取
+fn list_partitions(input: &str, fs_type: &str) -> Result<()> {
+    let names = match fs_type {
+        "payload" => payload_extractor::list_partitions(input)?,
+        _ => super_extractor::list_partitions(input)?,
+    };
+
+    for name in names {
+        println!("{}", name);
+    }
+
+    Ok(())
+}
+
+// 删除指定输入镜像对应的提取目录与配置文件
 fn clean_output_directory(input_path: &str, output_dir: &str) -> Result<()> {
     use std::fs;
 
