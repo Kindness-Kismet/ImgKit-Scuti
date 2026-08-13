@@ -1,12 +1,6 @@
 // Android filesystem image extraction and packing library.
 // Supports F2FS, EXT4 filesystems and Super partition.
 
-// Core abstraction layer
-pub mod core;
-
-// IO layer
-pub mod io;
-
 // Common utility functions
 pub mod utils;
 
