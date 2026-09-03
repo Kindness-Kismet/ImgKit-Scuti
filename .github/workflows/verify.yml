@@ -1,0 +1,155 @@
+# imgkit 本地验证的云端执行入口。
+# 结构: 前置 job 下载 ROM 进缓存, matrix job (3 平台 x 7 case) 各自跑验证。
+# 磁盘策略: Linux 删除预装工具链腾空间; macOS 全程分级清理; Windows 空间充足仅清 case 产物。
+
+name: verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_partition:
+        description: '基准分区名'
+        default: 'product'
+        type: string
+      erofs_tier:
+        description: 'erofs 级别档位'
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - high
+          - all
+      rom_mirror:
+        description: 'ROM 镜像源'
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - bigota
+          - bn
+          - cdnorg
+          - aliyun
+          - hugeota
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 前置: 下载 ROM 进 cache, cache key 由 config.py 生成, 换 ROM 自动失效
+  rom:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: 生成缓存 key
+        id: cache_key
+        run: |
+          KEY=$(python -c "import sys; sys.path.insert(0, 'scripts'); \
+            from verify_support import config; \
+            print(f'rom-{config.ROM_ZIP_NAME}-{config.ROM_SIZE}')")
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: 恢复 ROM 缓存
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: build/tmp/downloads/rom
+          key: ${{ steps.cache_key.outputs.key }}
+
+      - name: 下载 ROM
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/tmp/logs
+          python -u scripts/verify.py --stage prepare \
+            --rom-mirror ${{ inputs.rom_mirror }} 2>&1 | tee build/tmp/logs/rom.log
+
+      - name: 上传下载日志
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-rom
+          path: build/tmp/logs/
+
+  # 验证主体: 每个平台 x 每个 case 独立 job, 单 job 内最重的 lzma 约 3.5 小时
+  verify:
+    needs: rom
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        case:
+          - { name: ext4, fs: ext4, algo: '' }
+          - { name: f2fs, fs: f2fs, algo: '' }
+          - { name: lz4, fs: erofs, algo: lz4 }
+          - { name: lz4hc, fs: erofs, algo: lz4hc }
+          - { name: lzma, fs: erofs, algo: lzma }
+          - { name: deflate, fs: erofs, algo: deflate }
+          - { name: zstd, fs: erofs, algo: zstd }
+    runs-on: ${{ matrix.os }}
+    name: verify ${{ matrix.case.name }} @ ${{ matrix.os }}
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Linux 根分区仅 ~20 GB, 删预装工具链腾出 30 GB 以上
+      - name: 释放磁盘 (仅 Linux)
+        if: runner.os == 'Linux'
+        run: sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+
+      - name: 磁盘现状
+        shell: bash
+        run: df -h 2>/dev/null || true
+
+      - name: 生成缓存 key
+        id: cache_key
+        shell: bash
+        run: |
+          KEY=$(python -c "import sys; sys.path.insert(0, 'scripts'); \
+            from verify_support import config; \
+            print(f'rom-{config.ROM_ZIP_NAME}-{config.ROM_SIZE}')")
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: 恢复 ROM 缓存
+        uses: actions/cache/restore@v4
+        with:
+          path: build/tmp/downloads/rom
+          key: ${{ steps.cache_key.outputs.key }}
+          fail-on-cache-miss: true
+
+      - name: 执行验证
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/tmp/logs
+          # macOS 磁盘紧张, 全程分级清理; 其他平台仅清理 case 产物
+          PRUNE="cases"
+          if [ "$RUNNER_OS" = "macOS" ]; then PRUNE="payload,baseline,cases"; fi
+          ALGO_ARGS=""
+          if [ -n "${{ matrix.case.algo }}" ]; then
+            ALGO_ARGS="--erofs-algo ${{ matrix.case.algo }}"
+          fi
+          python -u scripts/verify.py \
+            --stage payload,baseline,fs \
+            --fs ${{ matrix.case.fs }} $ALGO_ARGS \
+            --erofs-tier ${{ inputs.erofs_tier }} \
+            --baseline-partition ${{ inputs.baseline_partition }} \
+            --prune "$PRUNE" 2>&1 | tee build/tmp/logs/verify.log
+
+      - name: 上传验证日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.os }}-${{ matrix.case.name }}
+          path: build/tmp/logs/
