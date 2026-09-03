@@ -2,7 +2,7 @@
 # 结构: 前置 job 下载 ROM 进缓存, matrix job (3 平台 x 7 case) 各自跑验证。
 # 磁盘策略: Linux 删除预装工具链腾空间; macOS 全程分级清理; Windows 空间充足仅清 case 产物。
 
-name: verify
+name: 解包与打包测试
 
 on:
   workflow_dispatch:
@@ -86,15 +86,23 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         case:
-          - { name: ext4, fs: ext4, algo: '' }
-          - { name: f2fs, fs: f2fs, algo: '' }
-          - { name: lz4, fs: erofs, algo: lz4 }
-          - { name: lz4hc, fs: erofs, algo: lz4hc }
-          - { name: lzma, fs: erofs, algo: lzma }
-          - { name: deflate, fs: erofs, algo: deflate }
-          - { name: zstd, fs: erofs, algo: zstd }
+          - { name: ext4,    fs: ext4,  algo: '',      label: 'ext4' }
+          - { name: f2fs,    fs: f2fs,  algo: '',      label: 'f2fs' }
+          - { name: lz4,     fs: erofs, algo: lz4,     label: 'erofs - lz4' }
+          - { name: lz4hc,   fs: erofs, algo: lz4hc,   label: 'erofs - lz4hc' }
+          - { name: lzma,    fs: erofs, algo: lzma,    label: 'erofs - lzma' }
+          - { name: deflate, fs: erofs, algo: deflate, label: 'erofs - deflate' }
+          - { name: zstd,    fs: erofs, algo: zstd,    label: 'erofs - zstd' }
+          # include 只带 os 的条目会合并进对应平台的全部组合, 附加显示名
+        include:
+          - os: ubuntu-latest
+            platform: ubuntu
+          - os: windows-latest
+            platform: windows
+          - os: macos-latest
+            platform: macos
     runs-on: ${{ matrix.os }}
-    name: verify ${{ matrix.case.name }} @ ${{ matrix.os }}
+    name: ${{ matrix.platform }} - ${{ matrix.case.label }} 验证
     timeout-minutes: 350
     steps:
       - uses: actions/checkout@v7
