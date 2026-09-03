@@ -41,9 +41,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
@@ -57,7 +57,7 @@ jobs:
 
       - name: 恢复 ROM 缓存
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: build/tmp/downloads/rom
           key: ${{ steps.cache_key.outputs.key }}
@@ -73,7 +73,7 @@ jobs:
 
       - name: 上传下载日志
         if: always() && steps.cache.outputs.cache-hit != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: logs-rom
           path: build/tmp/logs/
@@ -97,9 +97,9 @@ jobs:
     name: verify ${{ matrix.case.name }} @ ${{ matrix.os }}
     timeout-minutes: 350
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
@@ -124,7 +124,7 @@ jobs:
           echo "key=$KEY" >> "$GITHUB_OUTPUT"
 
       - name: 恢复 ROM 缓存
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: build/tmp/downloads/rom
           key: ${{ steps.cache_key.outputs.key }}
@@ -152,7 +152,7 @@ jobs:
 
       - name: 上传验证日志
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: logs-${{ matrix.os }}-${{ matrix.case.name }}
           path: build/tmp/logs/
