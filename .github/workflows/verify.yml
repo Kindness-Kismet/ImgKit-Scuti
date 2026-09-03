@@ -61,6 +61,8 @@ jobs:
         with:
           path: build/tmp/downloads/rom
           key: ${{ steps.cache_key.outputs.key }}
+          # rom job 在 Linux 保存, Windows 恢复需显式允许跨平台
+          enableCrossOsArchive: true
 
       - name: 下载 ROM
         if: steps.cache.outputs.cache-hit != 'true'
@@ -127,6 +129,7 @@ jobs:
           path: build/tmp/downloads/rom
           key: ${{ steps.cache_key.outputs.key }}
           fail-on-cache-miss: true
+          enableCrossOsArchive: true
 
       - name: 执行验证
         shell: bash
