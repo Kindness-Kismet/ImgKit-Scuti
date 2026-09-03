@@ -226,7 +226,7 @@ impl ErofsVolume {
                 &indices_buffer[0..64]
             );
         } else {
-            log::debug!("index buffer all bytes: {:02x?}", &indices_buffer);
+            log::debug!("index buffer all bytes: {:02x?}", indices_buffer);
         }
 
         // 辅助闭包: 计算指定 lcn 对应的 pack 参数
