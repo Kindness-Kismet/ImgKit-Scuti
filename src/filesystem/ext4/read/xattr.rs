@@ -25,7 +25,7 @@ impl Inode {
             {
                 // xattr entry 位于 header 之后, 按 4 字节对齐
                 let entries_start = (std::mem::size_of::<Ext4XattrIbodyHeader>() + 3) & !3;
-                self.parse_xattr_entries(inline_data, entries_start, &mut xattrs, volume)?;
+                self.parse_xattr_entries(&inline_data[entries_start..], 0, &mut xattrs, volume)?;
             }
         }
 

@@ -136,7 +136,7 @@ fn extract(
                 String::new()
             });
 
-        let mode = inode_info.mode & 0o777;
+        let mode = inode_info.mode & 0o7777;
         let mut link_target = String::new();
 
         if is_symlink(&inode_info) {

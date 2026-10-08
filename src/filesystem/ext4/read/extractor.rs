@@ -115,7 +115,7 @@ fn extract<R: std::io::Read + std::io::Seek + Send>(
 
         let owner = inode.inode.i_uid();
         let group = inode.inode.i_gid();
-        let mode = inode.inode.i_mode & 0o777;
+        let mode = inode.inode.i_mode & 0o7777;
         let mut link_target = String::new();
         let mut link_target_bytes: Vec<u8> = Vec::new();
 
@@ -286,10 +286,7 @@ fn extract_xattrs<R: std::io::Read + std::io::Seek>(
     let mut capabilities = String::new();
     for (name, value) in inode.xattrs(volume)? {
         if name == "security.selinux" {
-            let mut context = String::from_utf8_lossy(&value)
-                .trim_start_matches('\0')
-                .to_string();
-            context.push_str(":s0");
+            let context = String::from_utf8(value)?.trim_end_matches('\0').to_string();
             file_contexts.insert(path.to_path_buf(), context);
         } else if name == "security.capability"
             && let Some(cap_data) = VfsCapData::from_bytes(&value)

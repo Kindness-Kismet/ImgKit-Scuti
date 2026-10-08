@@ -52,13 +52,10 @@ pub struct Ext4Builder {
     block_alloc: BlockAllocator,
     inode_alloc: InodeAllocator,
     inode_map: HashMap<String, u32>,
-    #[allow(dead_code)]
     selinux_contexts: Option<SelinuxContexts>,
-    #[allow(dead_code)]
     fs_config: Option<FsConfig>,
-    #[allow(dead_code)]
     timestamp: u32,
-    dir_count: u32,
+    dir_counts: Vec<u32>,
 }
 
 impl Ext4Builder {
@@ -79,13 +76,15 @@ impl Ext4Builder {
         let selinux_contexts = config
             .file_contexts
             .as_ref()
-            .and_then(|path| SelinuxContexts::from_file(path).ok());
+            .map(|path| SelinuxContexts::from_file(path).map_err(std::io::Error::other))
+            .transpose()?;
 
         // 加载文件系统配置
         let fs_config = config
             .fs_config
             .as_ref()
-            .and_then(|path| FsConfig::from_file(path).ok());
+            .map(|path| FsConfig::from_file(path).map_err(std::io::Error::other))
+            .transpose()?;
 
         let timestamp = config.timestamp.unwrap_or_else(|| {
             std::time::SystemTime::now()
@@ -95,6 +94,7 @@ impl Ext4Builder {
                 .as_secs()
         }) as u32;
 
+        let dir_counts = vec![0; sb_builder.group_count() as usize];
         Ok(Ext4Builder {
             config,
             writer,
@@ -105,7 +105,7 @@ impl Ext4Builder {
             selinux_contexts,
             fs_config,
             timestamp,
-            dir_count: 0,
+            dir_counts,
         })
     }
 
@@ -189,7 +189,7 @@ impl Ext4Builder {
 
     // 检查 block group 是否存在 superblock 备份
     fn has_super_backup(&self, group_idx: u32) -> bool {
-        if group_idx == 0 {
+        if group_idx <= 1 {
             return true;
         }
         // superblock 备份位于 3, 5, 7 的幂次 block group 中
@@ -236,7 +236,18 @@ impl Ext4Builder {
             let symlink_info = read_symlink_info(&entry.path())
                 .map_err(|e| std::io::Error::other(e.to_string()))?;
 
-            if metadata.is_dir() {
+            if symlink_info.is_symlink {
+                let ino = self
+                    .inode_alloc
+                    .alloc_inode()
+                    .ok_or_else(|| std::io::Error::other("No more inodes"))?;
+                dir_builder.add_entry(ino, name_bytes, file_type::LNK);
+                self.create_symlink_inode(
+                    ino,
+                    &entry.path(),
+                    &symlink_info.target.unwrap_or_default(),
+                )?;
+            } else if metadata.is_dir() {
                 let ino = self
                     .inode_alloc
                     .alloc_inode()
@@ -247,17 +258,6 @@ impl Ext4Builder {
 
                 // 递归处理子目录
                 self.load_directory(&entry.path(), ino, current_ino)?;
-            } else if symlink_info.is_symlink {
-                // 符号链接 (包括 Windows 的 !<symlink> 格式)
-                let ino = self
-                    .inode_alloc
-                    .alloc_inode()
-                    .ok_or_else(|| std::io::Error::other("No more inodes"))?;
-
-                dir_builder.add_entry(ino, name_bytes, file_type::LNK);
-
-                // 创建符号链接 inode
-                self.create_symlink_inode(ino, &symlink_info.target.unwrap_or_default())?;
             } else if metadata.is_file() {
                 let ino = self
                     .inode_alloc
@@ -305,9 +305,8 @@ impl Ext4Builder {
             .with_links(2 + dir_count as u16)
             .with_extents(&extents);
 
-        let inode_data = builder.build(self.sb_builder.inode_size())?;
-        self.write_inode(current_ino, &inode_data)?;
-        self.dir_count += 1;
+        self.write_configured_inode(current_ino, path, builder)?;
+        self.dir_counts[self.inode_alloc.inode_group(current_ino) as usize] += 1;
 
         Ok(())
     }
@@ -340,14 +339,11 @@ impl Ext4Builder {
             .with_blocks((block_count * (block_size / 512)) as u32)
             .with_extents(&extents);
 
-        let inode_data = builder.build(self.sb_builder.inode_size())?;
-        self.write_inode(ino, &inode_data)?;
-
-        Ok(())
+        self.write_configured_inode(ino, path, builder)
     }
 
     // 创建符号链接 inode
-    fn create_symlink_inode(&mut self, ino: u32, target: &str) -> Result<()> {
+    fn create_symlink_inode(&mut self, ino: u32, path: &Path, target: &str) -> Result<()> {
         let target_bytes = target.as_bytes();
 
         let builder = if target_bytes.len() <= 60 {
@@ -377,10 +373,55 @@ impl Ext4Builder {
                 .with_extent_flag()
         };
 
-        let inode_data = builder.build(self.sb_builder.inode_size())?;
-        self.write_inode(ino, &inode_data)?;
+        self.write_configured_inode(ino, path, builder)
+    }
 
-        Ok(())
+    fn write_configured_inode(
+        &mut self,
+        ino: u32,
+        path: &Path,
+        mut builder: InodeBuilder,
+    ) -> Result<()> {
+        let relative = path
+            .strip_prefix(&self.config.source_dir)
+            .map_err(std::io::Error::other)?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let mount = self.config.mount_point.trim_matches('/');
+        let image_path = format!("/{mount}/{relative}").replace("//", "/");
+        builder = builder.with_times(self.timestamp, self.timestamp, self.timestamp);
+        if let Some(entry) = self
+            .fs_config
+            .as_ref()
+            .and_then(|config| config.lookup(&image_path))
+        {
+            builder = builder.with_attrs(entry.uid, entry.gid, entry.mode as u16);
+            if let Some(value) = entry.capability_xattr() {
+                builder.add_xattr(XattrEntry {
+                    name_index: XATTR_INDEX_SECURITY,
+                    name: b"capability".to_vec(),
+                    value,
+                });
+            }
+        }
+        if let Some(context) = self
+            .selinux_contexts
+            .as_mut()
+            .and_then(|contexts| contexts.lookup(image_path.trim_end_matches('/')))
+        {
+            builder = builder.with_selinux_context(&context);
+        }
+        let inode_size = self.sb_builder.inode_size();
+        let block_size = self.sb_builder.block_size();
+        if let Some(data) = builder.external_xattrs(inode_size, block_size as usize)? {
+            let block = self
+                .block_alloc
+                .alloc_block()
+                .ok_or_else(|| std::io::Error::other("扩展属性块空间不足"))?;
+            self.write_data_block(block, &data)?;
+            builder = builder.with_xattr_block(block, block_size);
+        }
+        self.write_inode(ino, &builder.build(inode_size)?)
     }
 
     // 写入 inode
@@ -428,11 +469,22 @@ impl Ext4Builder {
     // 写入元数据
     fn write_metadata(&mut self) -> Result<()> {
         // 写入 superblock
-        let sb = self.sb_builder.build()?;
+        let mut sb = self.sb_builder.build()?;
         let sb_bytes: &[u8] = zerocopy::IntoBytes::as_bytes(&sb);
 
         self.writer.seek(SeekFrom::Start(EXT4_SUPERBLOCK_OFFSET))?;
         self.writer.write_all(sb_bytes)?;
+
+        for group_idx in 1..self.sb_builder.group_count() {
+            if self.has_super_backup(group_idx) {
+                sb.s_block_group_nr = group_idx as u16;
+                let offset = u64::from(group_idx)
+                    * u64::from(self.sb_builder.blocks_per_group())
+                    * u64::from(self.sb_builder.block_size());
+                self.writer.seek(SeekFrom::Start(offset))?;
+                self.writer.write_all(zerocopy::IntoBytes::as_bytes(&sb))?;
+            }
+        }
 
         // 写入 group descriptor
         self.write_group_descriptors()?;
@@ -482,9 +534,9 @@ impl Ext4Builder {
             gd.bg_free_blocks_count_hi = (free_blocks >> 16) as u16;
             gd.bg_free_inodes_count_lo = (free_inodes & 0xFFFF) as u16;
             gd.bg_free_inodes_count_hi = (free_inodes >> 16) as u16;
-            // 目录计数应按 block group 统计, 此处暂置为 0 (后续可优化)
-            gd.bg_used_dirs_count_lo = 0;
-            gd.bg_used_dirs_count_hi = 0;
+            let dir_count = self.dir_counts[group_idx as usize];
+            gd.bg_used_dirs_count_lo = dir_count as u16;
+            gd.bg_used_dirs_count_hi = (dir_count >> 16) as u16;
             gd.bg_flags = 0;
             gd.bg_itable_unused_lo = free_inodes as u16;
             gd.bg_itable_unused_hi = (free_inodes >> 16) as u16;
@@ -502,6 +554,15 @@ impl Ext4Builder {
         let gdt_offset = block_size as u64; // 块 1
         self.writer.seek(SeekFrom::Start(gdt_offset))?;
         self.writer.write_all(&gdt_data)?;
+
+        for group_idx in 1..group_count {
+            if self.has_super_backup(group_idx) {
+                let offset = (u64::from(group_idx) * u64::from(blocks_per_group) + 1)
+                    * u64::from(block_size);
+                self.writer.seek(SeekFrom::Start(offset))?;
+                self.writer.write_all(&gdt_data)?;
+            }
+        }
 
         Ok(())
     }

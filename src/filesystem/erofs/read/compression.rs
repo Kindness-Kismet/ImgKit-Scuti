@@ -176,7 +176,7 @@ impl ErofsVolume {
 
         // 计算混合索引格式参数 (参考 erofs-utils lib/zmap.c:126-130)
         // compacted_4b_initial: 起始若干 cluster 使用 4 字节索引以对齐到 32 字节
-        let compacted_4b_initial = (((32 - (ebase % 32)) / 4) & 7) as usize;
+        let compacted_4b_initial = ((((32 - (ebase % 32)) / 4) & 7) as usize).min(num_clusters);
 
         // compacted_2b: 中间使用 2 字节索引的 cluster (必须是 16 的倍数)
         let compacted_2b = if (z_advise & 0x1) != 0 && compacted_4b_initial < num_clusters {

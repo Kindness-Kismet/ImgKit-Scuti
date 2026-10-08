@@ -3,8 +3,8 @@ use crate::filesystem::f2fs::consts::*;
 //
 // 负责构建 F2FS inode 块.
 
-use crate::filesystem::f2fs::Result;
 use crate::filesystem::f2fs::types::*;
+use crate::filesystem::f2fs::{F2fsError, Result};
 
 // inode 块中的地址数量
 const ADDRS_PER_INODE: usize = DEF_ADDRS_PER_INODE;
@@ -118,6 +118,7 @@ pub struct InodeBuilder {
 
     // 符号链接目标 (inline 数据)
     symlink_target: Option<Vec<u8>>,
+    uuid: [u8; 16],
 }
 
 impl InodeBuilder {
@@ -151,6 +152,7 @@ impl InodeBuilder {
             projid: 0,
             inline_xattrs: Vec::new(),
             symlink_target: None,
+            uuid: [0; 16],
         }
     }
 
@@ -255,6 +257,11 @@ impl InodeBuilder {
         self
     }
 
+    pub fn with_uuid(mut self, uuid: [u8; 16]) -> Self {
+        self.uuid = uuid;
+        self
+    }
+
     // 设置详细时间戳
     pub fn with_times(mut self, atime: u64, ctime: u64, mtime: u64, crtime: u64) -> Self {
         self.atime = atime;
@@ -342,6 +349,8 @@ impl InodeBuilder {
 
     // 添加 inline xattr
     pub fn add_inline_xattr(&mut self, entry: InlineXattrEntry) {
+        self.has_extra_attr = true;
+        self.inline_flags |= F2FS_EXTRA_ATTR;
         self.inline_xattrs.push(entry);
         self.inline_flags |= F2FS_INLINE_XATTR;
     }
@@ -352,12 +361,18 @@ impl InodeBuilder {
     }
 
     // 计算实际可用的地址数量
-    fn addrs_per_inode(&self) -> usize {
-        if self.has_extra_attr {
-            ADDRS_PER_INODE - (EXTRA_ISIZE as usize / 4) - DEFAULT_INLINE_XATTR_SIZE as usize
-        } else {
-            ADDRS_PER_INODE
-        }
+    pub(super) fn addrs_per_inode(&self) -> usize {
+        ADDRS_PER_INODE
+            - if self.has_extra_attr {
+                EXTRA_ISIZE as usize / 4
+            } else {
+                0
+            }
+            - if self.inline_flags & F2FS_INLINE_XATTR != 0 {
+                DEFAULT_INLINE_XATTR_SIZE as usize
+            } else {
+                0
+            }
     }
 
     // 构建 inode node 块
@@ -510,17 +525,17 @@ impl InodeBuilder {
             buf[offset..offset + 4].copy_from_slice(&n.to_le_bytes());
         }
 
-        // 写入 inline xattr (位于 footer 之前)
-        // inline xattr 区域从 inode 末尾向前推算
-        // 位置: F2FS_BLKSIZE - NODE_FOOTER_SIZE - inline_xattr_size * 4
+        // 内联属性位于地址数组末尾，后面还有五个节点编号。
         if !self.inline_xattrs.is_empty() && self.has_extra_attr {
             let inline_xattr_bytes = DEFAULT_INLINE_XATTR_SIZE as usize * 4; // 200 字节
-            let xattr_start = F2FS_BLKSIZE - NODE_FOOTER_SIZE - inline_xattr_bytes;
+            let xattr_start = nid_offset - inline_xattr_bytes;
 
             // 序列化所有 xattr 条目
             let mut xattr_data = Vec::new();
-            // xattr header: magic (4 字节)
+            // 属性头包含魔数、引用计数和十六字节保留区。
             xattr_data.extend_from_slice(&0xF2F52011u32.to_le_bytes());
+            xattr_data.extend_from_slice(&1u32.to_le_bytes());
+            xattr_data.extend_from_slice(&[0; 16]);
 
             for entry in &self.inline_xattrs {
                 xattr_data.extend_from_slice(&entry.to_bytes());
@@ -530,8 +545,12 @@ impl InodeBuilder {
             xattr_data.extend_from_slice(&[0u8; 4]);
 
             // 写入 xattr 数据
-            let write_len = xattr_data.len().min(inline_xattr_bytes);
-            buf[xattr_start..xattr_start + write_len].copy_from_slice(&xattr_data[..write_len]);
+            if xattr_data.len() > inline_xattr_bytes {
+                return Err(F2fsError::InvalidData(format!(
+                    "内联扩展属性超过 {inline_xattr_bytes} 字节"
+                )));
+            }
+            buf[xattr_start..xattr_start + xattr_data.len()].copy_from_slice(&xattr_data);
         }
 
         // node 尾部 (最后 24 字节)
@@ -547,7 +566,7 @@ impl InodeBuilder {
 
         // 计算并写入 inode 校验和 (启用 extra_attr 时)
         if self.has_extra_attr {
-            let checksum = calculate_inode_checksum(ino, &buf);
+            let checksum = calculate_inode_checksum(&self.uuid, ino, &buf);
             buf[368..372].copy_from_slice(&checksum.to_le_bytes());
         }
 
@@ -555,29 +574,18 @@ impl InodeBuilder {
     }
 }
 
-// 计算 inode 校验和
-// F2FS 采用 crc32(ino, inode_data) 的方式计算
-fn calculate_inode_checksum(ino: u32, inode_data: &[u8]) -> u32 {
-    let mut crc = F2FS_MAGIC;
+// 校验范围包含文件系统标识、节点编号、代数和置零的校验字段。
+fn calculate_inode_checksum(uuid: &[u8; 16], ino: u32, inode_data: &[u8]) -> u32 {
+    let seed = inode_crc32(u32::MAX, uuid);
+    let seed = inode_crc32(seed, &ino.to_le_bytes());
+    let seed = inode_crc32(seed, &inode_data[68..72]);
+    let crc = inode_crc32(seed, &inode_data[..368]);
+    let crc = inode_crc32(crc, &[0; 4]);
+    inode_crc32(crc, &inode_data[372..])
+}
 
-    // 先计算 ino 的 CRC
-    for &byte in &ino.to_le_bytes() {
-        crc ^= byte as u32;
-        for _ in 0..8 {
-            if crc & 1 != 0 {
-                crc = (crc >> 1) ^ 0xEDB88320;
-            } else {
-                crc >>= 1;
-            }
-        }
-    }
-
-    // 再计算 inode 数据的 CRC (跳过校验和字段)
-    for (i, &byte) in inode_data.iter().enumerate() {
-        // 跳过校验和字段 (偏移 368-371)
-        if (368..372).contains(&i) {
-            continue;
-        }
+fn inode_crc32(mut crc: u32, data: &[u8]) -> u32 {
+    for &byte in data {
         crc ^= byte as u32;
         for _ in 0..8 {
             if crc & 1 != 0 {
@@ -601,11 +609,15 @@ impl Default for InodeBuilder {
 #[derive(Debug)]
 pub struct DirectNodeBuilder {
     addrs: Vec<u32>,
+    node_offset: u32,
 }
 
 impl DirectNodeBuilder {
     pub fn new() -> Self {
-        DirectNodeBuilder { addrs: Vec::new() }
+        DirectNodeBuilder {
+            addrs: Vec::new(),
+            node_offset: 0,
+        }
     }
 
     pub fn add_addr(&mut self, addr: u32) {
@@ -616,6 +628,11 @@ impl DirectNodeBuilder {
 
     pub fn with_addrs(mut self, addrs: Vec<u32>) -> Self {
         self.addrs = addrs;
+        self
+    }
+
+    pub fn with_node_offset(mut self, offset: u32) -> Self {
+        self.node_offset = offset;
         self
     }
 
@@ -632,7 +649,7 @@ impl DirectNodeBuilder {
         let footer = NodeFooter {
             nid,
             ino,
-            flag: 0,
+            flag: self.node_offset << 3,
             cp_ver,
             next_blkaddr: 0,
         };
@@ -653,11 +670,20 @@ impl Default for DirectNodeBuilder {
 #[derive(Debug)]
 pub struct IndirectNodeBuilder {
     nids: Vec<u32>,
+    node_offset: u32,
 }
 
 impl IndirectNodeBuilder {
     pub fn new() -> Self {
-        IndirectNodeBuilder { nids: Vec::new() }
+        IndirectNodeBuilder {
+            nids: Vec::new(),
+            node_offset: 0,
+        }
+    }
+
+    pub fn with_node_offset(mut self, offset: u32) -> Self {
+        self.node_offset = offset;
+        self
     }
 
     pub fn add_nid(&mut self, nid: u32) {
@@ -687,7 +713,7 @@ impl IndirectNodeBuilder {
         let footer = NodeFooter {
             nid,
             ino,
-            flag: 0,
+            flag: self.node_offset << 3,
             cp_ver,
             next_blkaddr: 0,
         };

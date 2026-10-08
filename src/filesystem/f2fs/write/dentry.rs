@@ -203,7 +203,7 @@ fn str2hashbuf(msg: &[u8], len: usize, buf: &mut [u32; 4]) {
 }
 
 // 计算目录项哈希 (TEA hash)
-fn dentry_hash(name: &[u8]) -> u32 {
+pub(super) fn dentry_hash(name: &[u8]) -> u32 {
     if name.is_empty() {
         return 0;
     }

@@ -21,6 +21,7 @@ pub struct InodeBuilder {
     flags: u32,
     i_block: [u8; 60],
     xattrs: Vec<XattrEntry>,
+    xattr_block: u64,
 }
 
 impl InodeBuilder {
@@ -46,6 +47,7 @@ impl InodeBuilder {
             flags: inode_mode::EXT4_EXTENTS_FL,
             i_block: [0; 60],
             xattrs: Vec::new(),
+            xattr_block: 0,
         }
     }
 
@@ -136,6 +138,36 @@ impl InodeBuilder {
         self
     }
 
+    pub fn with_attrs(mut self, uid: u32, gid: u32, mode: u16) -> Self {
+        self.uid = uid;
+        self.gid = gid;
+        self.mode = (self.mode & inode_mode::S_IFMT) | (mode & 0o7777);
+        self
+    }
+
+    pub fn external_xattrs(&self, inode_size: u16, block_size: usize) -> Result<Option<Vec<u8>>> {
+        let required = 8 + self
+            .xattrs
+            .iter()
+            .map(|entry| entry.size() + entry.value.len().next_multiple_of(4))
+            .sum::<usize>();
+        if self.xattrs.is_empty() || required <= usize::from(inode_size).saturating_sub(160) {
+            return Ok(None);
+        }
+        let mut builder = XattrBlockBuilder::new();
+        for entry in &self.xattrs {
+            builder.add_entry(entry.clone());
+        }
+        builder.build(block_size).map(Some)
+    }
+
+    pub fn with_xattr_block(mut self, block: u64, block_size: u32) -> Self {
+        self.xattr_block = block;
+        self.blocks += block_size / 512;
+        self.xattrs.clear();
+        self
+    }
+
     // 构建 inode
     pub fn build(&self, inode_size: u16) -> Result<Vec<u8>> {
         let mut data = vec![0u8; inode_size as usize];
@@ -163,18 +195,15 @@ impl InodeBuilder {
         data[100..104].copy_from_slice(&0u32.to_le_bytes());
 
         // i_file_acl_lo ACL 块低 32 位
-        data[104..108].copy_from_slice(&0u32.to_le_bytes());
+        data[104..108].copy_from_slice(&(self.xattr_block as u32).to_le_bytes());
 
         // i_size_hi 文件大小高 32 位
         data[108..112].copy_from_slice(&((self.size >> 32) as u32).to_le_bytes());
 
-        // osd2 (12 字节)
-        data[112..116].copy_from_slice(&0u32.to_le_bytes()); // blocks_high
-        data[116..118].copy_from_slice(&0u16.to_le_bytes()); // file_acl_hi
-        data[118..120].copy_from_slice(&((self.uid >> 16) as u16).to_le_bytes());
-        data[120..122].copy_from_slice(&((self.gid >> 16) as u16).to_le_bytes());
-        data[122..124].copy_from_slice(&0u16.to_le_bytes()); // checksum_lo
-        data[124..126].copy_from_slice(&0u16.to_le_bytes()); // 保留字段
+        // 属主和属性块地址的高位按磁盘结构保存。
+        data[118..120].copy_from_slice(&((self.xattr_block >> 32) as u16).to_le_bytes());
+        data[120..122].copy_from_slice(&((self.uid >> 16) as u16).to_le_bytes());
+        data[122..124].copy_from_slice(&((self.gid >> 16) as u16).to_le_bytes());
 
         // 额外字段 (inode_size 大于 128 时存在)
         if inode_size > 128 {

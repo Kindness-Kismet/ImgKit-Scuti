@@ -3,6 +3,7 @@ use crate::filesystem::erofs::consts::*;
 //
 // 提供完整的 EROFS 镜像构建功能.
 
+use super::inode::XattrEntry;
 use crate::compression::Compressor;
 use crate::filesystem::erofs::write::compress::{
     PhysicalCluster, build_compress_metadata, compress_file_data, create_compressor,
@@ -93,13 +94,15 @@ impl ErofsBuilder {
         let selinux_contexts = config
             .file_contexts
             .as_ref()
-            .and_then(|path| SelinuxContexts::from_file(path).ok());
+            .map(|path| SelinuxContexts::from_file(path).map_err(std::io::Error::other))
+            .transpose()?;
 
         // 加载文件系统配置
         let fs_config = config
             .fs_config
             .as_ref()
-            .and_then(|path| FsConfig::from_file(path).ok());
+            .map(|path| FsConfig::from_file(path).map_err(std::io::Error::other))
+            .transpose()?;
 
         // 创建 superblock 构建器
         let mut superblock = SuperblockBuilder::new(block_size)
@@ -163,19 +166,36 @@ impl ErofsBuilder {
         Ok(())
     }
 
-    // 计算 SELinux xattr 数据大小
-    // xattr ibody header (12 字节) + 条目头 (4 字节) + name ("selinux" = 7 字节) + value
+    // 分配空间和写入使用相同的属性集合。
     fn calc_xattr_size(&self, fs_path: &str) -> usize {
+        let xattrs = self.inode_xattrs(fs_path);
+        if xattrs.is_empty() {
+            0
+        } else {
+            12 + xattrs.iter().map(XattrEntry::aligned_size).sum::<usize>()
+        }
+    }
+
+    fn inode_xattrs(&self, fs_path: &str) -> Vec<XattrEntry> {
+        let mut xattrs = Vec::new();
         if let Some(ref ctx) = self.selinux_contexts
             && let Some(context) = ctx.lookup_without_mut(fs_path)
         {
-            // xattr ibody header: 12 字节
-            // 条目: 4 字节头 + 7 字节 name + value 长度, 按 4 字节对齐
-            let entry_size = 4 + 7 + context.len();
-            let aligned_entry_size = (entry_size + 3) & !3;
-            return 12 + aligned_entry_size;
+            xattrs.push(XattrEntry::selinux(&context));
         }
-        0
+        if let Some(value) = self
+            .fs_config
+            .as_ref()
+            .and_then(|config| config.lookup(fs_path))
+            .and_then(|entry| entry.capability_xattr())
+        {
+            xattrs.push(XattrEntry {
+                name_index: EROFS_XATTR_INDEX_SECURITY,
+                name: b"capability".to_vec(),
+                value,
+            });
+        }
+        xattrs
     }
 
     // 扫描源目录
@@ -654,12 +674,7 @@ impl ErofsBuilder {
             let nid = self.nid_map.get(path).copied().unwrap_or(0);
             let inode_offset = nid * 32;
 
-            // 获取 SELinux 上下文
-            let selinux_context = if let Some(ref mut ctx) = self.selinux_contexts {
-                ctx.lookup(path)
-            } else {
-                None
-            };
+            let xattrs = self.inode_xattrs(path);
 
             let inode_data = if info.is_dir {
                 // 构建目录 inode
@@ -720,8 +735,8 @@ impl ErofsBuilder {
 
                 next_ino += 1;
 
-                if let Some(ref ctx) = selinux_context {
-                    inode = inode.with_selinux_context(ctx);
+                for entry in &xattrs {
+                    inode.add_xattr(entry.clone());
                 }
 
                 inode.build()?
@@ -740,8 +755,8 @@ impl ErofsBuilder {
 
                 next_ino += 1;
 
-                if let Some(ref ctx) = selinux_context {
-                    inode = inode.with_selinux_context(ctx);
+                for entry in &xattrs {
+                    inode.add_xattr(entry.clone());
                 }
 
                 inode.build()?
@@ -871,8 +886,8 @@ impl ErofsBuilder {
 
                 next_ino += 1;
 
-                if let Some(ref ctx) = selinux_context {
-                    inode = inode.with_selinux_context(ctx);
+                for entry in &xattrs {
+                    inode.add_xattr(entry.clone());
                 }
 
                 inode.build()?

@@ -6,6 +6,7 @@ pub mod types;
 
 // 读取功能
 pub mod read;
+pub use read::extractor;
 
 // 写入功能
 pub mod write;

@@ -8,6 +8,8 @@ use thiserror::Error;
 pub enum Ext4Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("无效的扩展属性: {0}")]
+    InvalidXattr(String),
     #[error("invalid magic: expected {expected}, found {found}")]
     Magic { expected: u16, found: u16 },
     #[error("incompatible filesystem feature: {0}")]

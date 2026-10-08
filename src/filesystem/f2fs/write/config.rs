@@ -2,7 +2,7 @@
 //
 // 解析 file_contexts 与 fs_config 文件.
 
-use crate::filesystem::f2fs::Result;
+use crate::filesystem::f2fs::{F2fsError, Result};
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
@@ -108,6 +108,15 @@ impl SelinuxContexts {
         None
     }
 
+    pub fn lookup_without_mut(&self, path: &str) -> Option<String> {
+        let normalized = normalize_config_path(path);
+        self.entries
+            .iter()
+            .rev()
+            .find(|entry| entry.regex.is_match(&normalized))
+            .map(|entry| entry.context.clone())
+    }
+
     // 获取条目数量
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -127,6 +136,18 @@ pub struct FsConfigEntry {
     pub gid: u32,
     pub mode: u32,
     pub capabilities: Option<u64>,
+}
+
+impl FsConfigEntry {
+    // 安卓权限配置使用第二版能力属性，继承位保持为零。
+    pub fn capability_xattr(&self) -> Option<Vec<u8>> {
+        self.capabilities.filter(|value| *value != 0).map(|value| {
+            [0x0200_0001, value as u32, 0, (value >> 32) as u32, 0]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect()
+        })
+    }
 }
 
 // 文件系统配置管理器
@@ -163,14 +184,25 @@ impl FsConfig {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 4 {
                 let path = parts[0].to_string();
-                let uid = parts[1].parse::<u32>().unwrap_or(0);
-                let gid = parts[2].parse::<u32>().unwrap_or(0);
-                let mode = u32::from_str_radix(parts[3], 8).unwrap_or(0o644);
-                let capabilities = if parts.len() > 4 {
-                    u64::from_str_radix(parts[4], 16).ok()
-                } else {
-                    None
-                };
+                let invalid = |err| F2fsError::InvalidData(format!("权限配置无效 {path}: {err}"));
+                let uid = parts[1].parse::<u32>().map_err(invalid)?;
+                let gid = parts[2].parse::<u32>().map_err(invalid)?;
+                let mode = u32::from_str_radix(parts[3], 8).map_err(invalid)?;
+                let capabilities = parts[4..]
+                    .iter()
+                    .find_map(|field| field.strip_prefix("capabilities="))
+                    .map(|value| {
+                        if let Some(hex) = value
+                            .strip_prefix("0x")
+                            .or_else(|| value.strip_prefix("0X"))
+                        {
+                            u64::from_str_radix(hex, 16)
+                        } else {
+                            value.parse::<u64>()
+                        }
+                        .map_err(invalid)
+                    })
+                    .transpose()?;
 
                 // 规范化路径
                 let normalized_path = normalize_config_path(&path);

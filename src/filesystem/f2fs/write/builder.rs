@@ -3,11 +3,12 @@ use crate::filesystem::f2fs::consts::*;
 //
 // 提供完整的 F2FS 镜像构建能力.
 
+use super::dentry::dentry_hash;
 use crate::filesystem::f2fs::types::*;
 use crate::filesystem::f2fs::write::{
-    CheckpointBuilder, CursegInfo, DentryBlockBuilder, DentryInfo, DirectNodeBuilder, FsConfig,
-    IndirectNodeBuilder, InodeBuilder, NatManager, SegmentAllocator, SelinuxContexts, SitManager,
-    SsaManager, SuperblockBuilder,
+    CheckpointBuilder, DentryBlockBuilder, DentryInfo, DirectNodeBuilder, FsConfig,
+    IndirectNodeBuilder, InlineXattrEntry, InodeBuilder, NatManager, SegmentAllocator,
+    SelinuxContexts, SitManager, SsaManager, SuperblockBuilder,
 };
 use crate::filesystem::f2fs::{F2fsError, Result};
 use crate::utils::symlink::read_symlink_info;
@@ -70,13 +71,15 @@ impl F2fsBuilder {
         let selinux_contexts = config
             .file_contexts
             .as_ref()
-            .and_then(|path| SelinuxContexts::from_file(path).ok());
+            .map(|path| SelinuxContexts::from_file(path))
+            .transpose()?;
 
         // 加载文件系统配置
         let fs_config = config
             .fs_config
             .as_ref()
-            .and_then(|path| FsConfig::from_file(path).ok());
+            .map(|path| FsConfig::from_file(path))
+            .transpose()?;
 
         // 创建 superblock 构建器并计算布局
         let mut superblock = SuperblockBuilder::new(config.image_size)
@@ -128,7 +131,7 @@ impl F2fsBuilder {
         let source_dir = self.config.source_dir.clone();
         let mount_point = self.config.mount_point.clone();
 
-        let (root_data_addrs, subdir_count) = if source_dir.exists() {
+        let (root_data_addrs, subdir_count, depth) = if source_dir.exists() {
             self.load_directory(&source_dir, F2FS_ROOT_INO, F2FS_ROOT_INO, &mount_point)?
         } else {
             // 即使没有源目录, 也要创建包含 "." 与 ".." 的根目录数据块
@@ -144,7 +147,7 @@ impl F2fsBuilder {
             let dentry_data = dentry_block.build()?;
             self.write_block(data_blkaddr, &dentry_data)?;
 
-            (vec![data_blkaddr], 0)
+            (vec![data_blkaddr], 0, 1)
         };
 
         // 写入根目录 inode
@@ -153,7 +156,7 @@ impl F2fsBuilder {
             root_blkaddr,
             F2FS_ROOT_INO,
             b"/",
-            1,
+            depth,
             &root_data_addrs,
             subdir_count,
             &mount_point,
@@ -196,13 +199,14 @@ impl F2fsBuilder {
         };
 
         let mut inode = InodeBuilder::new_dir(mode as u16, uid, gid)
+            .with_uuid(self.superblock.uuid())
             .with_timestamp(self.timestamp)
             .with_pino(pino)
             .with_name(name)
             .with_depth(depth)
             .with_links(2 + child_count)
             .with_size(F2FS_BLKSIZE as u64 * data_addrs.len() as u64)
-            .with_blocks((1 + data_addrs.len()) as u64)
+            .with_blocks((1 + data_addrs.iter().filter(|addr| **addr != 0).count()) as u64)
             .with_addrs(data_addrs.to_vec());
 
         // 设置 SELinux 上下文
@@ -210,6 +214,19 @@ impl F2fsBuilder {
             && let Some(context) = ctx.lookup(fs_path)
         {
             inode = inode.with_selinux_context(&context);
+        }
+
+        if let Some(value) = self
+            .fs_config
+            .as_ref()
+            .and_then(|config| config.lookup(fs_path))
+            .and_then(|entry| entry.capability_xattr())
+        {
+            inode.add_inline_xattr(InlineXattrEntry {
+                name_index: F2FS_XATTR_INDEX_SECURITY,
+                name: b"capability".to_vec(),
+                value,
+            });
         }
 
         self.write_block(blkaddr, &inode.build(ino, ino, self.cp_ver)?)
@@ -222,8 +239,8 @@ impl F2fsBuilder {
         parent_ino: u32,
         parent_pino: u32,
         parent_fs_path: &str,
-    ) -> Result<(Vec<u32>, u32)> {
-        let mut entries: Vec<_> = fs::read_dir(source_path)?.filter_map(|e| e.ok()).collect();
+    ) -> Result<(Vec<u32>, u32, u32)> {
+        let mut entries: Vec<_> = fs::read_dir(source_path)?.collect::<std::io::Result<_>>()?;
         entries.sort_by(|a, b| {
             let a_name = a.file_name();
             let b_name = b.file_name();
@@ -265,6 +282,7 @@ impl F2fsBuilder {
 
         let mut subdirs: Vec<DirInfo> = Vec::new();
         let mut subdir_count = 0u32;
+        let mut depth = 1;
 
         for entry in &entries {
             let name_bytes = entry.file_name();
@@ -311,19 +329,17 @@ impl F2fsBuilder {
                 (ino, file_type)
             };
 
-            // 先尝试加入当前块, 满了则新建一个块
             let dentry = DentryInfo::new(name, ino, file_type);
-            let added = dentry_blocks
-                .last_mut()
-                .is_some_and(|current_block| current_block.add_entry(dentry.clone()));
-            if !added {
-                let mut new_block = DentryBlockBuilder::new();
-                new_block.add_entry(dentry);
-                dentry_blocks.push(new_block);
-            }
+            depth = depth.max(Self::add_hashed_dentry(&mut dentry_blocks, dentry)?);
         }
 
         // 写入所有目录数据块
+        while dentry_blocks
+            .last()
+            .is_some_and(DentryBlockBuilder::is_empty)
+        {
+            dentry_blocks.pop();
+        }
         let mut data_addrs = Vec::new();
         for builder in &dentry_blocks {
             if !builder.is_empty() {
@@ -333,6 +349,8 @@ impl F2fsBuilder {
                     .set_data_summary(blkaddr, parent_ino, data_addrs.len() as u16)?;
                 self.write_block(blkaddr, &builder.build()?)?;
                 data_addrs.push(blkaddr);
+            } else {
+                data_addrs.push(0);
             }
         }
 
@@ -343,21 +361,51 @@ impl F2fsBuilder {
                 .file_name()
                 .map(|n| n.as_encoded_bytes().to_vec())
                 .unwrap_or_default();
-            let (sub_addrs, sub_count) =
+            let (sub_addrs, sub_count, sub_depth) =
                 self.load_directory(&dir.path, dir.ino, parent_ino, &dir.fs_path)?;
             self.write_dir_inode(
                 dir.ino,
                 dir.blkaddr,
                 parent_ino,
                 &name,
-                2,
+                sub_depth,
                 &sub_addrs,
                 sub_count,
                 &dir.fs_path,
             )?;
         }
 
-        Ok((data_addrs, subdir_count))
+        Ok((data_addrs, subdir_count, depth))
+    }
+
+    // 内核按文件名哈希定位目录桶；空桶保留为空洞。
+    fn add_hashed_dentry(blocks: &mut Vec<DentryBlockBuilder>, entry: DentryInfo) -> Result<u32> {
+        let capacity = DEF_ADDRS_PER_INODE - 9 - DEFAULT_INLINE_XATTR_ADDRS;
+        let hash = dentry_hash(&entry.name) as usize;
+        let mut level_start = 0;
+        let mut buckets = 1;
+        let mut depth = 1;
+        while level_start < capacity {
+            let start = level_start + (hash % buckets) * 2;
+            let end = (start + 2).min(capacity);
+            if start >= end {
+                break;
+            }
+            while blocks.len() < end {
+                blocks.push(DentryBlockBuilder::new());
+            }
+            for block in &mut blocks[start..end] {
+                if block.add_entry(entry.clone()) {
+                    return Ok(depth);
+                }
+            }
+            level_start += buckets * 2;
+            buckets *= 2;
+            depth += 1;
+        }
+        Err(F2fsError::InvalidData(
+            "目录需要尚未支持的间接数据块".into(),
+        ))
     }
 
     // 分配目录 inode 块
@@ -405,33 +453,43 @@ impl F2fsBuilder {
                 .with_mode(S_IFLNK | ((mode as u16) & 0o7777))
                 .with_symlink_target(target)
         } else {
-            // 普通文件
-            let file_size = metadata.len();
-
-            // 写入文件数据块 (仅普通文件)
-            let (direct_addrs, nids) = if metadata.is_file() && file_size > 0 {
-                let all_addrs = self.write_file_data(path)?;
-                self.organize_file_addrs(ino, all_addrs)?
-            } else {
-                (vec![], [0; 5])
-            };
-
-            InodeBuilder::new_file(mode as u16, uid, gid)
-                .with_size(file_size)
-                // i_blocks 包含 inode 块自身与数据块数量
-                .with_blocks(file_size.div_ceil(F2FS_BLKSIZE as u64) + 1)
-                .with_addrs(direct_addrs)
-                .with_nids(nids)
+            InodeBuilder::new_file(mode as u16, uid, gid).with_size(metadata.len())
         }
         .with_timestamp(self.timestamp)
+        .with_uuid(self.superblock.uuid())
         .with_pino(parent_ino)
         .with_name(&file_name);
+
+        if let Some(value) = self
+            .fs_config
+            .as_ref()
+            .and_then(|config| config.lookup(fs_path))
+            .and_then(|entry| entry.capability_xattr())
+        {
+            inode.add_inline_xattr(InlineXattrEntry {
+                name_index: F2FS_XATTR_INDEX_SECURITY,
+                name: b"capability".to_vec(),
+                value,
+            });
+        }
 
         // 设置 SELinux 上下文
         if let Some(ref mut ctx) = self.selinux_contexts
             && let Some(context) = ctx.lookup(fs_path)
         {
             inode = inode.with_selinux_context(&context);
+        }
+
+        if symlink_target.is_none() && metadata.is_file() {
+            let previous_node_count = self.nat.entry_count();
+            let addrs = self.write_file_data(path)?;
+            let data_count = addrs.len();
+            let (addrs, nids) = self.organize_file_addrs(ino, addrs, inode.addrs_per_inode())?;
+            let indirect_count = self.nat.entry_count() - previous_node_count;
+            inode = inode
+                .with_addrs(addrs)
+                .with_nids(nids)
+                .with_blocks((1 + data_count + indirect_count) as u64);
         }
 
         self.write_block(blkaddr, &inode.build(ino, ino, self.cp_ver)?)?;
@@ -465,24 +523,23 @@ impl F2fsBuilder {
         &mut self,
         ino: u32,
         all_addrs: Vec<u32>,
+        inode_capacity: usize,
     ) -> Result<(Vec<u32>, [u32; 5])> {
-        const ADDRS_PER_INODE: usize = 864; // 存在 extra_attr 与 inline_xattr 时
         const ADDRS_PER_BLOCK: usize = 1018;
         const NIDS_PER_BLOCK: usize = 1018;
 
         let mut direct_addrs = Vec::new();
         let mut nids = [0u32; 5];
 
-        // 为所有数据块设置 SSA 记录
-        for (idx, &blkaddr) in all_addrs.iter().enumerate() {
+        let direct_count = all_addrs.len().min(inode_capacity);
+        for (idx, &blkaddr) in all_addrs[..direct_count].iter().enumerate() {
             self.ssa.set_data_summary(blkaddr, ino, idx as u16)?;
         }
 
         // 1. 直接地址 (存放在 inode 内)
-        let direct_count = all_addrs.len().min(ADDRS_PER_INODE);
         direct_addrs.extend_from_slice(&all_addrs[..direct_count]);
 
-        if all_addrs.len() <= ADDRS_PER_INODE {
+        if all_addrs.len() <= inode_capacity {
             return Ok((direct_addrs, nids));
         }
 
@@ -496,7 +553,11 @@ impl F2fsBuilder {
             self.sit.mark_block_used(blkaddr, CURSEG_WARM_NODE as u16)?;
             self.ssa.set_node_summary(blkaddr, nid.0)?;
 
+            for (idx, &addr) in remaining[..count].iter().enumerate() {
+                self.ssa.set_data_summary(addr, nid.0, idx as u16)?;
+            }
             let direct_node = DirectNodeBuilder::new()
+                .with_node_offset(1)
                 .with_addrs(remaining[..count].to_vec())
                 .build(nid.0, ino, self.cp_ver);
             self.write_block(blkaddr, &direct_node)?;
@@ -514,7 +575,11 @@ impl F2fsBuilder {
             self.sit.mark_block_used(blkaddr, CURSEG_WARM_NODE as u16)?;
             self.ssa.set_node_summary(blkaddr, nid.0)?;
 
+            for (idx, &addr) in remaining[..count].iter().enumerate() {
+                self.ssa.set_data_summary(addr, nid.0, idx as u16)?;
+            }
             let direct_node = DirectNodeBuilder::new()
+                .with_node_offset(2)
                 .with_addrs(remaining[..count].to_vec())
                 .build(nid.0, ino, self.cp_ver);
             self.write_block(blkaddr, &direct_node)?;
@@ -525,24 +590,28 @@ impl F2fsBuilder {
 
         // 4. 第一个二级间接 node (nids[2])
         if !remaining.is_empty() {
-            nids[2] = self.alloc_double_indirect_node(ino, remaining, ADDRS_PER_BLOCK)?;
+            nids[2] = self.alloc_double_indirect_node(ino, remaining, ADDRS_PER_BLOCK, 3)?;
             let consumed = remaining.len().min(NIDS_PER_BLOCK * ADDRS_PER_BLOCK);
             remaining = &remaining[consumed..];
         }
 
         // 5. 第二个二级间接 node (nids[3])
         if !remaining.is_empty() {
-            nids[3] = self.alloc_double_indirect_node(ino, remaining, ADDRS_PER_BLOCK)?;
+            nids[3] = self.alloc_double_indirect_node(
+                ino,
+                remaining,
+                ADDRS_PER_BLOCK,
+                4 + NIDS_PER_BLOCK as u32,
+            )?;
             let consumed = remaining.len().min(NIDS_PER_BLOCK * ADDRS_PER_BLOCK);
             remaining = &remaining[consumed..];
         }
 
         // 6. 三级间接 node (nids[4]) - 按需使用
         if !remaining.is_empty() {
-            log::warn!(
-                "file requires triple indirect node ({} blocks remaining), not implemented",
-                remaining.len()
-            );
+            return Err(F2fsError::InvalidData(
+                "文件需要尚未支持的三级间接节点".into(),
+            ));
         }
 
         Ok((direct_addrs, nids))
@@ -554,6 +623,7 @@ impl F2fsBuilder {
         ino: u32,
         addrs: &[u32],
         addrs_per_block: usize,
+        node_offset: u32,
     ) -> Result<u32> {
         const NIDS_PER_BLOCK: usize = 1018;
 
@@ -568,7 +638,7 @@ impl F2fsBuilder {
             .set_node_summary(double_indirect_blkaddr, double_indirect_nid.0)?;
 
         // 创建 indirect node 构建器
-        let mut indirect_builder = IndirectNodeBuilder::new();
+        let mut indirect_builder = IndirectNodeBuilder::new().with_node_offset(node_offset);
 
         // 为每个 direct node 分配地址
         let mut offset = 0;
@@ -585,11 +655,13 @@ impl F2fsBuilder {
             self.ssa.set_node_summary(direct_blkaddr, direct_nid.0)?;
 
             // 写入 direct node
-            let direct_node = DirectNodeBuilder::new().with_addrs(chunk.to_vec()).build(
-                direct_nid.0,
-                ino,
-                self.cp_ver,
-            );
+            for (idx, &addr) in chunk.iter().enumerate() {
+                self.ssa.set_data_summary(addr, direct_nid.0, idx as u16)?;
+            }
+            let direct_node = DirectNodeBuilder::new()
+                .with_node_offset(node_offset + 1 + indirect_builder.len() as u32)
+                .with_addrs(chunk.to_vec())
+                .build(direct_nid.0, ino, self.cp_ver);
             self.write_block(direct_blkaddr, &direct_node)?;
 
             // 加入 indirect node
@@ -621,8 +693,8 @@ impl F2fsBuilder {
             .seek(SeekFrom::Start(F2FS_SUPER_OFFSET + F2FS_BLKSIZE as u64))?;
         self.writer.write_all(&sb_data)?;
 
-        // CP pack 结构: cp_header(1) + data_sum(1) + node_sum(3) + cp_footer(1) = 6 块
-        let cp_pack_blocks = 6u32;
+        // 普通摘要固定占六块，不会截断当前段的条目。
+        let cp_pack_blocks = 8u32;
 
         // 计算保留 segment 与超额预留 segment
         let ovp_segment_count = (layout.segment_count_main as f64 * 0.05) as u32;
@@ -680,9 +752,7 @@ impl F2fsBuilder {
             .with_sit_bitmap(sit_bitmap)
             .with_nat_bitmap(nat_bitmap)
             .with_cp_pack_total_block_count(cp_pack_blocks)
-            // 使用 CP_UMOUNT_FLAG | CP_COMPACT_SUM_FLAG
-            // CP_COMPACT_SUM_FLAG 表示 DATA summary 采用 compact 格式
-            .with_flags(CP_UMOUNT_FLAG | CP_COMPACT_SUM_FLAG);
+            .with_flags(CP_UMOUNT_FLAG);
 
         // 设置当前 segment 信息
         checkpoint.set_cur_node_seg(0, curseg_info.node_segno[0], curseg_info.node_blkoff[0]);
@@ -703,51 +773,33 @@ impl F2fsBuilder {
 
         let cp_data = checkpoint.build()?;
 
-        // 获取当前 segment 的 SSA 数据, 供 checkpoint pack 使用
-        let hot_node_segno = curseg_info.node_segno[0] as usize;
-        let warm_node_segno = curseg_info.node_segno[1] as usize;
-        let cold_node_segno = curseg_info.node_segno[2] as usize;
-        let hot_data_segno = curseg_info.data_segno[0] as usize;
-        let warm_data_segno = curseg_info.data_segno[1] as usize;
-        let cold_data_segno = curseg_info.data_segno[2] as usize;
+        let mut summaries = Vec::with_capacity(6);
+        for segno in curseg_info.data_segno {
+            summaries.push(self.ssa.build_curseg_summary(segno as usize, false)?);
+        }
+        for segno in curseg_info.node_segno {
+            summaries.push(self.ssa.build_curseg_summary(segno as usize, true)?);
+        }
+        for start in [
+            layout.cp_blkaddr,
+            layout.cp_blkaddr + DEFAULT_BLOCKS_PER_SEGMENT,
+        ] {
+            self.writer
+                .seek(SeekFrom::Start(u64::from(start) * F2FS_BLKSIZE as u64))?;
+            self.writer.write_all(&cp_data)?;
+            for summary in &summaries {
+                self.writer.write_all(summary)?;
+            }
+            self.writer.write_all(&cp_data)?;
+        }
 
-        // 构造 compact 格式的 DATA summary 块
-        // 结构: nat_journal(SUM_JOURNAL_SIZE) + sit_journal(SUM_JOURNAL_SIZE) + data summaries
-        let compact_sum = self.build_compact_data_summary(
-            &curseg_info,
-            hot_data_segno,
-            warm_data_segno,
-            cold_data_segno,
-        )?;
-
-        // 构建 NODE summary 块 (普通格式)
-        let node_sum_hot = self.ssa.build_curseg_summary(hot_node_segno, true)?;
-        let node_sum_warm = self.ssa.build_curseg_summary(warm_node_segno, true)?;
-        let node_sum_cold = self.ssa.build_curseg_summary(cold_node_segno, true)?;
-
-        // 写入第一个 checkpoint pack
-        let cp_offset = layout.cp_blkaddr as u64 * F2FS_BLKSIZE as u64;
-        self.writer.seek(SeekFrom::Start(cp_offset))?;
-        self.writer.write_all(&cp_data)?; // 块 0: CP header
-
-        self.writer.write_all(&compact_sum)?; // 块 1: compact data summary
-        self.writer.write_all(&node_sum_hot)?; // 块 2: hot node summary
-        self.writer.write_all(&node_sum_warm)?; // 块 3: warm node summary
-        self.writer.write_all(&node_sum_cold)?; // 块 4: cold node summary
-        self.writer.write_all(&cp_data)?; // 块 5: CP footer
-
-        // 写入第二个 checkpoint pack (位于下一个 segment)
-        let cp2_offset =
-            (layout.cp_blkaddr + DEFAULT_BLOCKS_PER_SEGMENT) as u64 * F2FS_BLKSIZE as u64;
-        self.writer.seek(SeekFrom::Start(cp2_offset))?;
-        self.writer.write_all(&cp_data)?; // 块 0: CP header
-        self.writer.write_all(&compact_sum)?; // 块 1: compact data summary
-        self.writer.write_all(&node_sum_hot)?; // 块 2: hot node summary
-        self.writer.write_all(&node_sum_warm)?; // 块 3: warm node summary
-        self.writer.write_all(&node_sum_cold)?; // 块 4: cold node summary
-        self.writer.write_all(&cp_data)?; // 块 5: CP footer
-
-        // SIT 区域保持为空, 数据存放在 checkpoint 的 SIT journal 中
+        // 检查点只覆盖当前段，历史段仍需完整的段信息表和摘要表。
+        let sit_copy_blocks = layout.segment_count_sit / 2 * DEFAULT_BLOCKS_PER_SEGMENT;
+        for start in [layout.sit_blkaddr, layout.sit_blkaddr + sit_copy_blocks] {
+            self.writer
+                .seek(SeekFrom::Start(u64::from(start) * F2FS_BLKSIZE as u64))?;
+            self.sit.write_to(&mut self.writer)?;
+        }
 
         // 写入 NAT 区域
         let nat_data = self.nat.to_bytes();
@@ -769,95 +821,13 @@ impl F2fsBuilder {
         self.writer.seek(SeekFrom::Start(nat_offset_2))?;
         self.writer.write_all(&nat_data)?;
 
-        // SSA 区域保持为空, 数据存放在 checkpoint 的 summary 块中
+        self.writer.seek(SeekFrom::Start(
+            u64::from(layout.ssa_blkaddr) * F2FS_BLKSIZE as u64,
+        ))?;
+        self.ssa.write_to(&mut self.writer)?;
 
         self.writer.flush()?;
         Ok(())
-    }
-
-    // 构造 compact 格式的 DATA summary 块
-    // 结构: n_nats + n_sits + NAT 条目 + SIT 条目 + DATA summaries + footer
-    fn build_compact_data_summary(
-        &self,
-        curseg_info: &CursegInfo,
-        hot_data_segno: usize,
-        warm_data_segno: usize,
-        cold_data_segno: usize,
-    ) -> Result<Vec<u8>> {
-        let mut buf = vec![0u8; F2FS_BLKSIZE];
-        let mut offset = 0usize;
-
-        // 1. NAT journal (507 字节)
-        buf[offset..offset + 2].copy_from_slice(&0u16.to_le_bytes());
-        offset = 507; // 跳过整个 NAT journal 空间
-
-        // 2. SIT journal (507 字节)
-        let n_sits: u16 = 6;
-        buf[offset..offset + 2].copy_from_slice(&n_sits.to_le_bytes());
-        offset += 2;
-
-        for i in 0..6 {
-            let (segno, seg_type) = if i < 3 {
-                (curseg_info.data_segno[i], i as u16)
-            } else {
-                (curseg_info.node_segno[i - 3], i as u16)
-            };
-
-            let valid_blocks = if i < 3 {
-                curseg_info.data_blkoff[i]
-            } else {
-                curseg_info.node_blkoff[i - 3]
-            };
-
-            // segno (4 字节)
-            buf[offset..offset + 4].copy_from_slice(&segno.to_le_bytes());
-            offset += 4;
-
-            // vblocks (2 字节)
-            let vblocks = valid_blocks | (seg_type << SIT_VBLOCKS_SHIFT);
-            buf[offset..offset + 2].copy_from_slice(&vblocks.to_le_bytes());
-            offset += 2;
-
-            // valid_map (64 字节)
-            if let Some(sit_entry) = self.sit.get_entry(segno) {
-                buf[offset..offset + 64].copy_from_slice(&sit_entry.valid_map);
-            }
-            offset += 64;
-
-            // mtime (8 字节)
-            offset += 8;
-        }
-
-        // 将 SIT journal 补齐到 507 字节
-        offset = 1014; // NAT journal (507) + SIT journal (507)
-
-        // 3. DATA summary 三类: hot, warm, cold
-        let data_segnos = [hot_data_segno, warm_data_segno, cold_data_segno];
-        let data_blkoffs = [
-            curseg_info.data_blkoff[0] as usize,
-            curseg_info.data_blkoff[1] as usize,
-            curseg_info.data_blkoff[2] as usize,
-        ];
-
-        for (seg_idx, &segno) in data_segnos.iter().enumerate() {
-            let blk_off = data_blkoffs[seg_idx];
-
-            for j in 0..blk_off {
-                if offset + SUMMARY_SIZE > F2FS_BLKSIZE - SUM_FOOTER_SIZE {
-                    break;
-                }
-
-                // 从 SSA 管理器获取 summary 条目
-                if let Some(entry) = self.ssa.get_summary_entry(segno, j) {
-                    buf[offset..offset + 4].copy_from_slice(&entry.nid.to_le_bytes());
-                    buf[offset + 4] = entry.version;
-                    buf[offset + 5..offset + 7].copy_from_slice(&entry.ofs_in_node.to_le_bytes());
-                }
-                offset += SUMMARY_SIZE;
-            }
-        }
-
-        Ok(buf)
     }
 
     // 写入块

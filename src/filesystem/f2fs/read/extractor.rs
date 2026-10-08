@@ -3,6 +3,7 @@
 // 提供文件系统提取与配置文件生成功能
 
 use crate::container::sparse::SparseReader;
+use crate::filesystem::ext4::types::VfsCapData;
 use crate::filesystem::f2fs::{F2fsVolume, Inode, Nid};
 use crate::utils::{
     check_windows_case_conflict, create_symlink, display_completion, display_progress,
@@ -92,21 +93,21 @@ fn extract<R: Read + Seek + Send + Sync>(
     // 提取根目录的 xattr (与 EXT4/EROFS 保持一致)
     let root_node = volume.read_node(root_nid)?;
     let root_inode = Inode::from_bytes(&root_node)?;
+    let root_capabilities = extract_xattrs(
+        &volume,
+        &root_inode,
+        root_nid,
+        Path::new("/"),
+        &mut file_contexts,
+    )?;
     fs_config.push((
         PathBuf::from("/"),
         root_inode.uid,
         root_inode.gid,
-        root_inode.mode & 0o777,
-        String::new(),
+        root_inode.mode & 0o7777,
+        root_capabilities,
         String::new(),
     ));
-    extract_xattrs(
-        &volume,
-        &root_inode,
-        root_nid,
-        &PathBuf::from("/"),
-        &mut file_contexts,
-    );
 
     // 第一阶段: 按遍历顺序收集所有文件任务
     let mut file_tasks = Vec::new();
@@ -300,15 +301,15 @@ fn collect_directory_tasks<R: Read + Seek + Send>(
         })?;
         let entry_inode = Inode::from_bytes(&entry_node)?;
 
-        extract_xattrs(
+        let capabilities = extract_xattrs(
             reader,
             &entry_inode,
             entry.nid,
             &entry_rel_path,
             file_contexts,
-        );
+        )?;
 
-        let mode = entry_inode.mode & 0o777;
+        let mode = entry_inode.mode & 0o7777;
         let link_target = if entry.file_type == 7 {
             reader
                 .read_symlink_target(&entry_inode, entry.nid)
@@ -322,7 +323,7 @@ fn collect_directory_tasks<R: Read + Seek + Send>(
             entry_inode.uid,
             entry_inode.gid,
             mode,
-            String::new(),
+            capabilities,
             link_target,
         ));
 
@@ -361,26 +362,20 @@ fn extract_xattrs<R: Read + Seek + Send>(
     nid: Nid,
     path: &Path,
     file_contexts: &mut std::collections::HashMap<PathBuf, String>,
-) {
-    match reader.read_xattrs(inode, nid) {
-        Ok(xattrs) => {
-            for (name, value) in xattrs {
-                if name == "security.selinux" {
-                    let mut context = String::from_utf8_lossy(&value)
-                        .trim_start_matches('\0')
-                        .trim_end_matches('\0')
-                        .to_string();
-                    if !context.is_empty() {
-                        if !context.ends_with(":s0") {
-                            context.push_str(":s0");
-                        }
-                        file_contexts.insert(path.to_path_buf(), context);
-                    }
-                }
+) -> Result<String> {
+    let mut capabilities = String::new();
+    for (name, value) in reader.read_xattrs(inode, nid)? {
+        if name == "security.selinux" {
+            let context = String::from_utf8(value)?.trim_end_matches('\0').to_string();
+            if !context.is_empty() {
+                file_contexts.insert(path.to_path_buf(), context);
             }
-        }
-        Err(_) => {
-            // 忽略 xattr 读取失败, 部分文件可能没有 xattr
+        } else if name == "security.capability"
+            && let Some(data) = VfsCapData::from_bytes(&value)
+            && data.effective() != 0
+        {
+            capabilities = format!("capabilities=0X{:X}", data.effective());
         }
     }
+    Ok(capabilities)
 }

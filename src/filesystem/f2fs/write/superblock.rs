@@ -109,6 +109,10 @@ impl SuperblockBuilder {
         self
     }
 
+    pub fn uuid(&self) -> [u8; 16] {
+        self.uuid
+    }
+
     // 计算布局
     pub fn calculate_layout(&mut self) -> Result<&SuperblockLayout> {
         let log_sectorsize = log_base_2(self.sector_size);

@@ -10,39 +10,38 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
     // 读取 inode 的全部 xattr
     pub fn read_xattrs(&self, inode: &Inode, nid: Nid) -> Result<Vec<(String, Vec<u8>)>> {
         let mut xattrs = Vec::new();
-
-        // 1. 读取 inline xattr (如果存在)
+        let mut data = Vec::new();
         if inode.inline & F2FS_INLINE_XATTR != 0 {
             let node_data = self.read_node(nid)?;
-
-            // F2FS inline xattr 布局:
-            // inline xattr 位于 inode footer 之前
-            // 起始偏移固定为: node 大小 - footer(24) - inline_xattr_size
-            let inline_xattr_size = DEFAULT_INLINE_XATTR_ADDRS * 4; // 200 字节
-            let xattr_offset = node_data.len() - 24 - inline_xattr_size;
-
-            if node_data.len() >= xattr_offset + inline_xattr_size {
-                let xattr_data = &node_data[xattr_offset..xattr_offset + inline_xattr_size];
-
-                // F2FS inline xattr 的前 4 字节为头部 (通常为 0x00000000)
-                // 实际的 xattr 条目从第 5 字节开始
-                if xattr_data.len() > 4 {
-                    Self::parse_xattr_entries(&xattr_data[4..], &mut xattrs)?;
-                }
+            let inline_size = if self.superblock.features & F2FS_FEATURE_FLEXIBLE_INLINE_XATTR != 0
+                && inode.inline & F2FS_EXTRA_ATTR != 0
+            {
+                usize::from(u16::from_le_bytes([node_data[362], node_data[363]])) * 4
+            } else {
+                DEFAULT_INLINE_XATTR_ADDRS * 4
+            };
+            let nid_offset = 360 + DEF_ADDRS_PER_INODE * 4;
+            let extra_size = if inode.inline & F2FS_EXTRA_ATTR != 0 {
+                usize::from(inode.extra_isize)
+            } else {
+                0
+            };
+            if inline_size + extra_size > DEF_ADDRS_PER_INODE * 4 {
+                return Err(F2fsError::InvalidData("内联扩展属性长度越界".into()));
             }
+            data.extend_from_slice(&node_data[nid_offset - inline_size..nid_offset]);
         }
-
-        // 2. 读取 xattr node (如果存在)
         if inode.xattr_nid != 0 {
-            let xattr_node_data = self.read_node(Nid(inode.xattr_nid))?;
-
-            // xattr node 布局: 24 字节头部 + xattr 数据 + 24 字节 footer
-            if xattr_node_data.len() > 48 {
-                let xattr_data = &xattr_node_data[24..xattr_node_data.len() - 24];
-                Self::parse_xattr_entries(xattr_data, &mut xattrs)?;
-            }
+            let node_data = self.read_node(Nid(inode.xattr_nid))?;
+            data.extend_from_slice(&node_data[..node_data.len() - 24]);
         }
-
+        if data.is_empty() || data.iter().all(|byte| *byte == 0) {
+            return Ok(xattrs);
+        }
+        if data.len() < 28 || data[..4] != 0xF2F52011u32.to_le_bytes() {
+            return Err(F2fsError::InvalidData("扩展属性头无效".into()));
+        }
+        Self::parse_xattr_entries(&data[24..], &mut xattrs)?;
         Ok(xattrs)
     }
 
@@ -56,14 +55,10 @@ impl<R: Read + Seek + Send> F2fsVolume<R> {
                 break;
             }
 
-            match XattrEntry::from_bytes(&data[offset..]) {
-                Ok((entry, size)) => {
-                    let name = entry.full_name();
-                    xattrs.push((name, entry.value.clone()));
-                    offset += size;
-                }
-                Err(_) => break, // 出错时停止解析
-            }
+            let (entry, size) = XattrEntry::from_bytes(&data[offset..])
+                .map_err(|err| F2fsError::InvalidData(err.to_string()))?;
+            xattrs.push((entry.full_name(), entry.value));
+            offset += size;
         }
 
         Ok(())

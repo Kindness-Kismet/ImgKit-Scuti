@@ -1,6 +1,7 @@
 // EXT4 xattr 构建器
 
 use crate::filesystem::ext4::Result;
+use crate::filesystem::ext4::error::Ext4Error;
 use crate::filesystem::ext4::types::*;
 
 // xattr 的 name index
@@ -53,8 +54,17 @@ impl XattrEntry {
         // e_value_size 值长度
         buf.extend_from_slice(&(self.value.len() as u32).to_le_bytes());
 
-        // e_hash 名称哈希
-        buf.extend_from_slice(&0u32.to_le_bytes());
+        // 外部属性必须带有名称及属性值的校验哈希。
+        let mut hash = self
+            .name
+            .iter()
+            .fold(0u32, |hash, byte| hash.rotate_left(5) ^ u32::from(*byte));
+        for chunk in self.value.chunks(4) {
+            let mut word = [0; 4];
+            word[..chunk.len()].copy_from_slice(chunk);
+            hash = hash.rotate_left(16) ^ u32::from_le_bytes(word);
+        }
+        buf.extend_from_slice(&hash.to_le_bytes());
 
         // e_name 名称
         buf.extend_from_slice(&self.name);
@@ -88,40 +98,9 @@ impl XattrBlockBuilder {
 
     // 构建 xattr 块
     pub fn build(&self, block_size: usize) -> Result<Vec<u8>> {
-        let mut block = vec![0u8; block_size];
-
-        // 写入 xattr header
-        let magic = EXT4_XATTR_HEADER_MAGIC;
-        block[0..4].copy_from_slice(&magic.to_le_bytes());
+        let mut block = build_entries(&self.entries, block_size, 32, 0)?;
         block[4..8].copy_from_slice(&1u32.to_le_bytes()); // h_refcount
         block[8..12].copy_from_slice(&1u32.to_le_bytes()); // h_blocks
-        block[12..16].copy_from_slice(&0u32.to_le_bytes()); // h_hash
-        block[16..20].copy_from_slice(&0u32.to_le_bytes()); // h_checksum
-
-        let mut offset = 32; // header 大小
-        let mut value_offset = block_size;
-
-        // 写入 entry
-        for entry in &self.entries {
-            let entry_bytes = entry.to_bytes();
-
-            // 更新 value_offset
-            value_offset -= entry.value.len();
-            value_offset = (value_offset / 4) * 4; // 对齐
-
-            // 写入 entry 头部
-            block[offset..offset + entry_bytes.len()].copy_from_slice(&entry_bytes);
-
-            // 更新 e_value_offs
-            let value_offs = (value_offset - offset) as u16;
-            block[offset + 2..offset + 4].copy_from_slice(&value_offs.to_le_bytes());
-
-            // 写入属性值
-            block[value_offset..value_offset + entry.value.len()].copy_from_slice(&entry.value);
-
-            offset += entry_bytes.len();
-        }
-
         Ok(block)
     }
 
@@ -157,50 +136,7 @@ impl InlineXattrBuilder {
 
     // 构建 inline xattr 数据
     pub fn build(&self, max_size: usize) -> Result<Vec<u8>> {
-        let mut data = Vec::new();
-
-        // 在头部写入魔数
-        data.extend_from_slice(&EXT4_XATTR_HEADER_MAGIC.to_le_bytes());
-
-        let mut value_offset = max_size;
-
-        // 写入 entry
-        for entry in &self.entries {
-            let entry_bytes = entry.to_bytes();
-
-            // 更新 value_offset
-            value_offset -= entry.value.len();
-            value_offset = (value_offset / 4) * 4; // 对齐
-
-            // 写入 entry 头部
-            data.extend_from_slice(&entry_bytes);
-
-            // 更新 e_value_offs (相对于 inline xattr 区域起始位置)
-            let offs_pos = data.len() - entry_bytes.len() + 2;
-            let value_offs = (value_offset - 4) as u16; // 减 4 是因为魔数占用
-            data[offs_pos..offs_pos + 2].copy_from_slice(&value_offs.to_le_bytes());
-        }
-
-        // 添加终止标记
-        data.extend_from_slice(&[0u8; 4]);
-
-        // 填充到 max_size
-        if data.len() < max_size {
-            // 写入属性值
-            let mut values_data = vec![0u8; max_size - data.len()];
-            let mut write_offset = max_size - data.len();
-
-            for entry in self.entries.iter().rev() {
-                write_offset -= entry.value.len();
-                write_offset = (write_offset / 4) * 4;
-                values_data[write_offset..write_offset + entry.value.len()]
-                    .copy_from_slice(&entry.value);
-            }
-
-            data.extend_from_slice(&values_data);
-        }
-
-        Ok(data)
+        build_entries(&self.entries, max_size, 4, 4)
     }
 
     // 判断是否为空
@@ -213,6 +149,55 @@ impl Default for InlineXattrBuilder {
     fn default() -> Self {
         Self::new()
     }
+}
+
+// 内联属性相对首条条目寻址，外部属性相对块起点寻址。
+fn build_entries(
+    entries: &[XattrEntry],
+    size: usize,
+    header_size: usize,
+    value_base: usize,
+) -> Result<Vec<u8>> {
+    let required = header_size
+        + 4
+        + entries
+            .iter()
+            .map(|entry| entry.size() + entry.value.len().next_multiple_of(4))
+            .sum::<usize>();
+    if required > size || size > u16::MAX as usize + 1 {
+        return Err(Ext4Error::InvalidXattr(format!(
+            "需要 {required} 字节，容量 {size} 字节"
+        )));
+    }
+    let mut data = vec![0; size];
+    data[..4].copy_from_slice(&EXT4_XATTR_HEADER_MAGIC.to_le_bytes());
+    let mut sorted_entries: Vec<_> = entries.iter().collect();
+    sorted_entries.sort_by(|left, right| {
+        (left.name_index, left.name.len(), &left.name).cmp(&(
+            right.name_index,
+            right.name.len(),
+            &right.name,
+        ))
+    });
+    let mut offset = header_size;
+    let mut value_offset = size;
+    for entry in sorted_entries {
+        if entry.name.len() > u8::MAX as usize {
+            return Err(Ext4Error::InvalidXattr("属性名称超过 255 字节".into()));
+        }
+        value_offset = (value_offset - entry.value.len()) & !3;
+        let encoded = entry.to_bytes();
+        data[offset..offset + encoded.len()].copy_from_slice(&encoded);
+        let relative = if entry.value.is_empty() {
+            0
+        } else {
+            (value_offset - value_base) as u16
+        };
+        data[offset + 2..offset + 4].copy_from_slice(&relative.to_le_bytes());
+        data[value_offset..value_offset + entry.value.len()].copy_from_slice(&entry.value);
+        offset += encoded.len();
+    }
+    Ok(data)
 }
 
 #[cfg(test)]

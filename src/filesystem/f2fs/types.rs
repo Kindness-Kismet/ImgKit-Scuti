@@ -69,6 +69,7 @@ pub struct Superblock {
     pub nat_blkaddr: u32,
     pub ssa_blkaddr: u32,
     pub main_blkaddr: u32,
+    pub features: u32,
 }
 
 impl Superblock {
@@ -107,6 +108,8 @@ impl Superblock {
         let nat_blkaddr = cursor.read_u32::<LittleEndian>()?;
         let ssa_blkaddr = cursor.read_u32::<LittleEndian>()?;
         let main_blkaddr = cursor.read_u32::<LittleEndian>()?;
+        cursor.set_position(2180);
+        let features = cursor.read_u32::<LittleEndian>()?;
 
         Ok(Superblock {
             magic,
@@ -118,6 +121,7 @@ impl Superblock {
             nat_blkaddr,
             ssa_blkaddr,
             main_blkaddr,
+            features,
         })
     }
 }
