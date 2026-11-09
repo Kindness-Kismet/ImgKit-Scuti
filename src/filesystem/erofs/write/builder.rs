@@ -753,6 +753,15 @@ impl ErofsBuilder {
                     .with_extended(false)
                     .with_inline_data(target);
 
+                // 仅覆盖显式配置，缺项保留符号链接默认权限 0777。
+                if let Some(entry) = self
+                    .fs_config
+                    .as_ref()
+                    .and_then(|config| config.lookup(&info.fs_path))
+                {
+                    inode = inode.with_mode(S_IFLNK | ((entry.mode as u16) & 0o7777));
+                }
+
                 next_ino += 1;
 
                 for entry in &xattrs {
